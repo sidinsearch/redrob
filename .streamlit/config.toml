@@ -1,0 +1,27 @@
+[server]
+# Max upload size in MB. Default is 200.
+# Set to 500 to accept the full candidates.jsonl (487 MB) or any
+# reasonable slice via the Streamlit sandbox.
+maxUploadSize = 500
+
+# Run headlessly (no auto-open browser)
+headless = true
+
+# Don't phone home with usage stats
+gatherUsageStats = false
+
+[browser]
+# Suppress the "client hasn't connected" warning
+gatherUsageStats = false
+
+[theme]
+base = "light"
+primaryColor = "#1f77b4"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#262730"
+font = "sans serif"
+
+[runner]
+# Re-evaluate on file changes during dev
+fastReruns = true
