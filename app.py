@@ -219,15 +219,22 @@ df = df.rename(columns={"candidate_id": "ID", "score": "Score", "reasoning": "Re
 
 st.dataframe(
     df,
-    use_container_width=True,
+    width="stretch",
     hide_index=True,
     height=400,
 )
 
-# Download button
+# Download button — write CSV to in-memory string
 import io
 csv_buf = io.StringIO()
-output.write_submission(rows, csv_buf)
+import csv as _csv
+writer = _csv.writer(csv_buf, lineterminator="\n")
+writer.writerow(["candidate_id", "rank", "score", "reasoning"])
+for cid, rank, score, reasoning in rows:
+    r = (reasoning or "").replace("\n", " ").replace("\r", " ").strip()
+    if len(r) > 300:
+        r = r[:299].rstrip() + "…"
+    writer.writerow([cid, int(rank), f"{float(score):.6f}", r])
 st.download_button(
     label="Download submission.csv",
     data=csv_buf.getvalue(),
@@ -295,7 +302,7 @@ if selected_id:
             ("Location", f.location_score, 0.05),
             ("Availability", f.availability_score, 0.05),
         ], columns=["Component", "Value", "Weight"])
-        st.dataframe(comp_df, use_container_width=True, hide_index=True)
+        st.dataframe(comp_df, width="stretch", hide_index=True)
 
 
 # ----------------------------------------------------------------------------
