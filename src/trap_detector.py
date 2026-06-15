@@ -1,0 +1,172 @@
+"""trap_detector.py — Classify candidates into 4 trap types and honeypots.
+
+Each trap is independently detected. Multiple traps apply multiplicatively
+(floored at TRAP_FLOOR). Honeypots are forced to score 0.0 — they cannot
+appear in the top 100.
+
+The trap detection is the single most important stage for Stage 3 survival.
+A 10% honeypot rate triggers disqualification. We aim for 0%.
+
+ponytail: this module is pure — no I/O. Given Features in, returns trap info.
+Trap detection must run BEFORE scoring, so we can apply the multiplier.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import config
+from features import Features
+
+
+# ----------------------------------------------------------------------------
+# Trap type detection
+# ----------------------------------------------------------------------------
+
+def detect_keyword_stuffer(f: Features) -> bool:
+    """Type 1: Non-technical title + 4+ AI skills + zero foundational ML +
+    skills are only LLM buzzwords.
+
+    This is the explicit trap from the JD: marketing/HR/finance people who
+    list RAG, LangChain, Embeddings as skills but have never built anything.
+    """
+    if f.title_score >= 0.40:
+        return False  # Has a real title
+    if f.ai_skill_count < config.KEYWORD_STUFFER_MIN_AI_SKILLS:
+        return False
+    if f.has_foundational_ml:
+        return False  # Real ML — not a stuffer
+    if f.has_ranking_skills:
+        return False
+    if f.has_ai_title_in_history:
+        return False
+    # Check that buzzwords dominate the AI skills
+    if not f.has_llm_buzzwords_only:
+        return False
+    return True
+
+
+def detect_template_summary(f: Features) -> bool:
+    """Type 2: Summary contains the canned 'curious about AI tools' phrase.
+
+    The dataset has ~63K candidates with this exact phrase. It's a strong
+    signal of a generic AI-curious non-specialist.
+    """
+    return f.template_summary_match
+
+
+def detect_consulting_only(f: Features) -> bool:
+    """Type 3: All employers are consulting/services companies.
+
+    Per the JD: 'People who have only worked at consulting firms (TCS, Infosys,
+    Wipro, Accenture, Cognizant, Capgemini, etc.) in their entire career'.
+    """
+    # We computed career_product_ratio = product / total in features.
+    # 0.0 means no product companies, only consulting/unknown.
+    # We flag if there are consulting jobs AND no product history.
+    if f.career_product_ratio == 0.0 and len(f.career_history) > 0:
+        # Check at least one company classified as consulting
+        for c in f.career_history:
+            company = (c.get("company") or "").lower().strip()
+            for consulting in config.CONSULTING_COMPANIES:
+                if consulting in company or company in consulting:
+                    return True
+        return False
+    return False
+
+
+def detect_title_chaser(f: Features) -> bool:
+    """Type 4: 4+ jobs in last 8 years with avg tenure <18 months.
+
+    Per the JD: 'Title-chasers. If your career trajectory shows you optimizing
+    for Senior → Staff → Principal titles by switching companies every 1.5
+    years, we're not a fit.'
+    """
+    return f.is_title_chaser
+
+
+# ----------------------------------------------------------------------------
+# Honeypot detection
+# ----------------------------------------------------------------------------
+
+def is_honeypot(f: Features) -> bool:
+    """Return True if candidate is a forced-zero honeypot."""
+    if f.career_timeline_anomaly:
+        return True
+    if f.expert_with_zero_duration:
+        return True
+    if f.title_skills_history_mismatch:
+        return True
+    return False
+
+
+# ----------------------------------------------------------------------------
+# Combined trap analysis
+# ----------------------------------------------------------------------------
+
+@dataclass
+class TrapInfo:
+    """Result of trap detection for a single candidate."""
+    is_honeypot: bool
+    is_keyword_stuffer: bool
+    is_template_summary: bool
+    is_consulting_only: bool
+    is_title_chaser: bool
+    trap_multiplier: float
+    honeypot_reasons: list  # human-readable
+
+
+def analyze(f: Features) -> TrapInfo:
+    """Run all trap detectors. Returns a TrapInfo with multiplier."""
+    is_honeypot_flag = is_honeypot(f)
+    is_ks = detect_keyword_stuffer(f)
+    is_ts = detect_template_summary(f)
+    is_co = detect_consulting_only(f)
+    is_tc = detect_title_chaser(f)
+
+    # If keyword stuffer, skip template summary (already covered)
+    if is_ks:
+        is_ts = False
+
+    # Multiplier
+    if is_honeypot_flag:
+        multiplier = config.HONEYPOT_TAX
+    else:
+        multiplier = 1.0
+        if is_ks:
+            multiplier *= config.TRAP_MULTIPLIERS["keyword_stuffer"]
+        if is_ts:
+            multiplier *= config.TRAP_MULTIPLIERS["template_summary"]
+        if is_co:
+            multiplier *= config.TRAP_MULTIPLIERS["consulting_only"]
+        if is_tc:
+            multiplier *= config.TRAP_MULTIPLIERS["title_chaser"]
+        # Floor (except for honeypots which are forced to bottom)
+        multiplier = max(multiplier, config.TRAP_FLOOR)
+
+    # Reasons
+    reasons = []
+    if f.career_timeline_anomaly:
+        reasons.append("career timeline impossible (YoE > career span)")
+    if f.expert_with_zero_duration:
+        reasons.append(f"expert in {config.EXPERT_SKILL_FAKE_THRESHOLD}+ skills with 0 months use")
+    if f.title_skills_history_mismatch:
+        reasons.append("AI title with no AI skills or AI history")
+    if is_ks:
+        reasons.append("keyword stuffer (no foundational ML)")
+    if is_ts:
+        reasons.append("canned AI-curious summary")
+    if is_co:
+        reasons.append("consulting-only career")
+    if is_tc:
+        reasons.append(f"title-chaser ({f.num_jobs_8yr} jobs in 8yr, avg {f.avg_tenure_months_8yr:.0f}mo)")
+
+    return TrapInfo(
+        is_honeypot=is_honeypot_flag,
+        is_keyword_stuffer=is_ks,
+        is_template_summary=is_ts,
+        is_consulting_only=is_co,
+        is_title_chaser=is_tc,
+        trap_multiplier=multiplier,
+        honeypot_reasons=reasons,
+    )

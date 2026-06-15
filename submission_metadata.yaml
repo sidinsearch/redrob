@@ -1,0 +1,83 @@
+# Redrob Hackathon — Submission Metadata
+# Mirrors what you submit via the portal. Stage 3 review uses this file
+# to verify your portal metadata.
+
+# ============================================================================
+# Team identity
+# ============================================================================
+team_name: "redrob-ranker"
+
+primary_contact:
+  name: "Your Name"
+  email: "primary@example.com"
+  phone: "+91-XXXXXXXXXX"
+
+team_members:
+  - name: "Your Name"
+    email: "your.email@example.com"
+    role: "Solo"
+
+# ============================================================================
+# Code and reproducibility
+# ============================================================================
+github_repo: "https://github.com/YOUR_USERNAME/redrob-ranker"
+sandbox_link: "https://huggingface.co/spaces/YOUR_USERNAME/redrob-ranker-sandbox"
+reproduce_command: "python rank.py --candidates ./candidates.jsonl --out ./output/submission.csv"
+
+# ============================================================================
+# Compute environment
+# ============================================================================
+compute:
+  platform: "Windows 11 / x86_64"
+  cpu_cores: 8
+  ram_gb: 16
+  python_version: "3.11"
+  os: "Windows 11"
+  uses_gpu_for_inference: false
+  has_network_during_ranking: false
+  pre_computation_required: false
+  pre_computation_time_minutes: 0
+
+# ============================================================================
+# AI tools declaration
+# ============================================================================
+ai_tools_used:
+  - "Claude"
+  # "Cursor", "GitHub Copilot", "ChatGPT", "Gemini", "Other", "None"
+
+ai_usage_summary: |
+  AI tools (Claude / OpenCode) used for:
+  - Architecture discussion and review
+  - Code structure planning
+  - Documentation drafting
+  No candidate data was fed to any LLM during the build. The ranker code
+  was written by a human with AI assistance; the design decisions (weights,
+  trap thresholds, scoring formula) are documented in src/config.py and
+  docs/METHODOLOGY.md. All numbers in the ranker are constants tuned against
+  the dataset description in the JD, not against any LLM output.
+
+# ============================================================================
+# Approach summary
+# ============================================================================
+methodology_summary: |
+  Stdlib-only, CPU-only, no-network ranker. Pure rule-based weighted
+  scoring with explicit trap detection. 9 component signals (title, YoE,
+  product exp, AI skills depth, career relevance, education, behavioral,
+  location, availability) combined with a multiplicative trap penalty
+  across 4 trap types (keyword stuffer, template summary, consulting-only,
+  title-chaser) and 3 honeypot patterns (career-timeline impossible,
+  expert-with-zero-duration, title-skills mismatch). Honeypots forced to
+  bottom (0% in top-100). Streamed JSONL with byte-offset index for
+  sub-second top-100 retrieval. ~35s runtime on 100K pool, well under the
+  5-min budget. Single-command reproduction; pure stdlib means zero
+  dependency drift at Stage 3.
+
+# ============================================================================
+# Declarations
+# ============================================================================
+declarations:
+  read_submission_spec: true
+  code_is_original_work: true
+  no_collusion: true
+  honeypot_check_done: true
+  reproduction_tested: true

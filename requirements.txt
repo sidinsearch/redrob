@@ -1,0 +1,4 @@
+streamlit>=1.30.0
+# Everything else is Python stdlib.
+# This is the only external dependency, used by the Streamlit sandbox app.
+# The ranker (rank.py) and all src/ modules are 100% stdlib.

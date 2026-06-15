@@ -1,0 +1,11 @@
+# Exclude the same things as .gitignore, but optimized for Docker layer caching
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+*.egg-info/
+.git/
+.opencode/
+*.log
+output/
+.DS_Store

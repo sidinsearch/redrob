@@ -1,0 +1,121 @@
+# ============================================================
+# Redrob Candidate Ranker — .gitignore
+# ============================================================
+# This file controls what gets committed to the GitHub repo.
+# The repo must contain the ranker code, docs, and config ONLY.
+# No AI agentic setup files, no candidate data, no IDE state.
+# ============================================================
+
+# ----------------------------------------------------------
+# 1. AI agentic / OpenCode setup (PRIMARY EXCLUSION)
+# ----------------------------------------------------------
+# These are LOCAL dev environment files for AI coding agents.
+# They have no role in the actual ranker and would only confuse
+# reviewers at Stage 3 code reproduction.
+/.opencode/
+/.opencode/**
+/AGENTS.md
+/opencode.json
+/opencode.jsonc
+
+# Generic AI tool configs (skip if you don't use these)
+.claude/
+.cursor/
+.copilot/
+.aider*
+.continue/
+.windsurf/
+.gemini/
+.codeium/
+
+# ----------------------------------------------------------
+# 2. Hackathon INPUT data — DO NOT commit (487 MB file)
+# ----------------------------------------------------------
+# The candidate pool is too large for git. Read at runtime.
+candidates.jsonl
+candidates.jsonl.gz
+*.jsonl.gz
+
+# Bundled docs that came WITH the hackathon (not our source):
+# We re-include some of these in our repo (see "DO commit" below)
+job_description.docx
+README.docx
+redrob_signals_doc.docx
+submission_spec.docx
+
+# Local copies of the data, if user dropped them in the repo
+data/raw/
+input/
+test_data/
+
+# ----------------------------------------------------------
+# 3. Python
+# ----------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+pyrightconfig.json.bak
+
+# Virtual envs
+.venv/
+venv/
+env/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+*.whl
+
+# ----------------------------------------------------------
+# 4. Streamlit / sandbox app state
+# ----------------------------------------------------------
+.streamlit/secrets.toml
+
+# ----------------------------------------------------------
+# 5. Generated output (the ranker produces these; reviewers re-run)
+# ----------------------------------------------------------
+output/submission.csv
+!output/.gitkeep
+!tests/fixtures/*.csv
+
+# ----------------------------------------------------------
+# 6. IDE / editor state
+# ----------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+*~
+
+# ----------------------------------------------------------
+# 7. Logs / runtime
+# ----------------------------------------------------------
+*.log
+*.out
+*.err
+.tmp/
+tmp/
+temp/
+
+# ----------------------------------------------------------
+# 8. OS / misc
+# ----------------------------------------------------------
+.directory
+*.bak
+*.orig
+*.rej
