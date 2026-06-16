@@ -1,4 +1,6 @@
 streamlit>=1.30.0
+pandas>=2.0.0
+plotly>=5.18.0
 # Everything else is Python stdlib.
-# This is the only external dependency, used by the Streamlit sandbox app.
+# These are the only external dependencies, used by the Streamlit sandbox app.
 # The ranker (rank.py) and all src/ modules are 100% stdlib.

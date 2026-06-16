@@ -1,7 +1,7 @@
 # 🎯 Redrob Candidate Ranker
 
-> **100,000 candidates → top 100 best matches** for the Senior AI Engineer — Founding Team JD.
-> Built for the [Redrob AI Challenge](https://huggingface.co/spaces/EeshanSingh/redrob-ranker).
+> **100,000 candidates → top 100 best matches** for the Senior AI Engineer — Founding Team JD.  
+> Built for the [Redrob AI Challenge](https://hack2skill.com/event/india_runs/).
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org)
 [![Stdlib only](https://img.shields.io/badge/dependencies-stdlib_only-green.svg)](requirements.txt)
