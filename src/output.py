@@ -7,7 +7,13 @@ Writes submission CSV per the spec:
 - rank: integer 1-100, used exactly once
 - score: float, non-increasing by rank, ties broken by candidate_id ascending
 
+Also writes honeypots.csv alongside submission.csv with full details on
+every candidate flagged as a honeypot, including the specific reasons.
+
 Includes a built-in validator that mirrors validate_submission.py.
+
+ponytail: keep output dumb. All reasoning about which rows go where lives
+in rank.py; this module only writes bytes and validates bytes.
 """
 
 from __future__ import annotations
@@ -21,6 +27,37 @@ import config
 
 REQUIRED_HEADER = ["candidate_id", "rank", "score", "reasoning"]
 CANDIDATE_ID_PATTERN = re.compile(r"^CAND_[0-9]{7}$")
+
+# Honeypot CSV columns. We persist the full set of detection flags so
+# reviewers can see exactly why each candidate was forced to the bottom.
+HONEYPOT_HEADER = [
+    "candidate_id",
+    "current_title",
+    "current_company",
+    "years_of_experience",
+    "location",
+    "country",
+    "honeypot_reasons",
+    "n_reasons",
+    # Each individual flag — 1/0.
+    "career_timeline_anomaly",
+    "expert_with_zero_duration",
+    "title_skills_history_mismatch",
+    "employment_overlap_anomaly",
+    "duration_integrity_violation",
+    "title_responsibility_mismatch",
+    "skill_experience_contradiction",
+    "education_timeline_anomaly",
+    "career_progression_anomaly",
+    "achievement_inflation",
+    "technology_age_anomaly",
+    "synthetic_profile",
+    "cross_field_inconsistency",
+    "nlp_claim_without_evidence",
+    "ai_skill_count",
+    "pre_llm_roles",
+    "num_career_entries",
+]
 
 
 def write_submission(rows: List[Tuple[str, int, float, str]], path: str | Path) -> None:
@@ -41,6 +78,21 @@ def write_submission(rows: List[Tuple[str, int, float, str]], path: str | Path) 
                 r = r[: config.MAX_REASONING_LEN - 1].rstrip() + "…"
             # Use 6 decimal places to avoid score-tie collisions at 4dp
             writer.writerow([cid, int(rank), f"{float(score):.6f}", r])
+
+
+def write_honeypots(honeypot_rows: list, path: str | Path) -> None:
+    """Write honeypots.csv with one row per detected honeypot.
+
+    honeypot_rows: list of dicts with keys matching HONEYPOT_HEADER plus
+    an `extra` field for any free-form evidence.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f, lineterminator="\n")
+        writer.writerow(HONEYPOT_HEADER)
+        for row in honeypot_rows:
+            writer.writerow([row.get(col, "") for col in HONEYPOT_HEADER])
 
 
 def validate(path: str | Path) -> List[str]:

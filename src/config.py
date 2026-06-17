@@ -24,15 +24,17 @@ from __future__ import annotations
 # and the trap types described in the architecture doc.
 
 WEIGHTS = {
-    "title_relevance": 0.25,
-    "experience_fit": 0.12,
+    "title_relevance": 0.20,
+    "experience_fit": 0.10,
     "product_exp": 0.10,
-    "ai_skills_depth": 0.15,
-    "career_relevance": 0.10,
+    "ai_skills_depth": 0.11,
+    "career_relevance": 0.11,
     "education_score": 0.03,
-    "behavioral_score": 0.15,
+    "behavioral_score": 0.12,
     "location_fit": 0.05,
     "availability_score": 0.05,
+    "pre_llm_signal": 0.05,
+    "jd_must_have_score": 0.08,
 }
 assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-9, "WEIGHTS must sum to 1.0"
 
@@ -267,6 +269,104 @@ TRAP_FLOOR = 0.30  # Multiple traps floor at 30%
 # ============================================================================
 HONEYPOT_TAX = -1e9  # Force honeypots to bottom
 HONEYPOT_YOE_BUFFER_YEARS = 5  # YoE > career span + 5yr → honeypot
+
+# Pre-LLM-era signals. JD: "people who understood retrieval and ranking
+# before it became fashionable". Pre-2020 production experience with
+# retrieval/ranking/embeddings/ML is a strong positive signal. Detected by
+# looking at start_dates in career_history.
+PRE_LLM_CUTOFF_YEAR = 2020  # Anything started before this in retrieval/ML = pre-LLM signal
+PRE_LLM_BOOST_MAX = 0.30  # capped contribution to pre_llm_signal component
+
+# Timeline validation thresholds
+HONEYPOT_OVERLAP_MAX_JOBS = 3  # >3 concurrent jobs = suspicious
+HONEYPOT_GAP_MAX_DAYS = 180   # >6-month unexplained gap = suspicious if claim continuous
+
+# Skill-experience contradiction: claims a skill with 0 months usage.
+# Threshold: claim advanced/expert proficiency with duration_months < 3.
+HONEYPOT_ADV_NO_DURATION_MONTHS = 3
+
+# Education timeline: claims degree end_year before age 18 (impossible) or
+# after a career start (suspicious but not always wrong).
+HONEYPOT_EDU_AGE_MIN = 18
+
+# Title-responsibility: title claims ML/AI but no ML/AI keywords in any
+# job description across career. Strong honeypot signal.
+HONEYPOT_TITLE_RESPONSIBILITY_MATCH_THRESHOLD = 0  # 0 AI keywords = honeypot
+
+# Achievement validation: descriptions with extreme inflation markers
+# (e.g., "10x", "100x improvement", "world-class", "best in class") and
+# no supporting numbers elsewhere = suspicious.
+HONEYPOT_ACHIEVEMENT_INFLATION_KEYWORDS = [
+    "world-class", "world class", "best in class", "industry-leading",
+    "industry leading", "10x", "100x", "1000x", "10x faster", "10x improvement",
+    "10x more", "revolutionized", "revolutionary", "groundbreaking", "cutting-edge",
+    "state-of-the-art", "state of the art", "pioneering", "unprecedented",
+]
+HONEYPOT_ACHIEVEMENT_INFLATION_MIN = 3  # ≥3 inflation keywords in summary+career = suspicious
+
+# Technology age: skill names reference technologies that didn't exist
+# in claimed start years (e.g., claiming PyTorch expertise starting 2015).
+TECH_RELEASE_YEARS = {
+    "pytorch": 2016,
+    "tensorflow": 2015,
+    "transformers": 2017,
+    "huggingface": 2016,
+    "hugging face": 2016,
+    "langchain": 2022,
+    "llamaindex": 2022,
+    "pinecone": 2019,
+    "weaviate": 2019,
+    "qdrant": 2021,
+    "chroma": 2022,
+    "faiss": 2017,
+    "sentence-transformers": 2019,
+    "sentence transformers": 2019,
+    "sbert": 2019,
+    "colbert": 2020,
+    "lora": 2021,
+    "qlora": 2023,
+    "peft": 2022,
+    "mlflow": 2018,
+    "kubeflow": 2017,
+    "wandb": 2017,
+    "weights & biases": 2017,
+    "rag": 2020,
+    "retrieval-augmented generation": 2020,
+    "openai": 2020,
+    "chatgpt": 2022,
+    "gpt-4": 2023,
+    "claude": 2023,
+    "gemini": 2023,
+    "bert": 2018,
+    "gpt-3": 2020,
+    "gpt-2": 2019,
+    "roberta": 2019,
+    "t5": 2019,
+    "ragas": 2023,
+    "llamaindex": 2022,
+    "langgraph": 2024,
+    "ollama": 2023,
+    "vllm": 2023,
+}
+
+# Synthetic profile detection: nearly-empty profile with high AI skill
+# count is a strong honeypot signal (mass-generated fake profiles).
+HONEYPOT_SYNTHETIC_PROFILE_MIN_AI_SKILLS = 8
+HONEYPOT_SYNTHETIC_PROFILE_MIN_COMPLETENESS = 70.0
+HONEYPOT_SYNTHETIC_PROFILE_MAX_YOE = 4  # <4 YoE with 8+ AI skills is suspicious
+HONEYPOT_SYNTHETIC_PROFILE_MAX_HISTORY = 2  # ≤2 career entries with high skills = suspicious
+
+# Cross-field consistency: certain field combinations are suspicious
+# (e.g., "NLP Researcher" + "consulting-only career" + "no skills in NLP").
+NLP_KEYWORDS = ["nlp", "natural language", "language model", "llm", "text classification",
+                "named entity", "sentiment", "transformer", "tokeniz"]
+CV_KEYWORDS = ["computer vision", "image classification", "object detection",
+               "segmentation", "opencv", "yolo", "cnn", "convolutional",
+               "image recognition", "visual recognition", "image segmentation"]
+SPEECH_KEYWORDS = ["speech recognition", "tts", "asr", "text-to-speech", "speech synthesis",
+                   "wake word", "speaker diarization", "audio classification"]
+ROBOTICS_KEYWORDS = ["robotics", "ros", "slam", "path planning", "robot operating system",
+                     "manipulation", "autonomous vehicle", "autonomous driving"]
 
 # ============================================================================
 # Behavioral signal normalization

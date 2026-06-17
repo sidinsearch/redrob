@@ -74,9 +74,15 @@ class _TopKTracker:
 # ----------------------------------------------------------------------------
 
 def run(candidates_path: str | Path, out_path: str | Path, top_k: int = config.TOP_K) -> dict:
-    """Run the full pipeline. Returns a stats dict."""
+    """Run the full pipeline. Returns a stats dict.
+
+    Side effects:
+    - Writes <out_path>          → top-100 ranked submission CSV.
+    - Writes <out_path>.honeypots.csv → full details of every honeypot.
+    """
     candidates_path = Path(candidates_path)
     out_path = Path(out_path)
+    honeypot_path = out_path.with_name(out_path.stem + ".honeypots.csv")
 
     t0 = time.perf_counter()
     topk = _TopKTracker(top_k)
@@ -88,6 +94,10 @@ def run(candidates_path: str | Path, out_path: str | Path, top_k: int = config.T
     n_consulting_only = 0
     n_title_chaser = 0
     n_skipped = 0
+    # Detailed honeypot records: [(cid, features_dict, trap), ...]
+    # Stored as raw features dicts so we can write the full CSV at the end
+    # without re-extracting.
+    honeypot_details: list = []
 
     print(f"[ranker] reading {candidates_path} ({parser.path_size_mb(candidates_path):.1f} MB)")
     sys.stdout.flush()
@@ -106,6 +116,7 @@ def run(candidates_path: str | Path, out_path: str | Path, top_k: int = config.T
         trap = analyze(features)
         if trap.is_honeypot:
             n_honeypots += 1
+            honeypot_details.append((features, trap))
         if trap.is_keyword_stuffer:
             n_keyword_stuffers += 1
         if trap.is_template_summary:
@@ -132,6 +143,40 @@ def run(candidates_path: str | Path, out_path: str | Path, top_k: int = config.T
     print(f"[ranker] extracted features in {t1 - t0:.1f}s "
           f"({n_total} total, {n_skipped} skipped, {n_honeypots} honeypots)")
     sys.stdout.flush()
+
+    # Write honeypots.csv with full details.
+    honeypot_csv_rows = []
+    for f, trap in honeypot_details:
+        reasons = trap.honeypot_reasons
+        honeypot_csv_rows.append({
+            "candidate_id": f.candidate_id,
+            "current_title": f.current_title,
+            "current_company": f.current_company,
+            "years_of_experience": f.years_of_experience,
+            "location": f.location,
+            "country": f.country,
+            "honeypot_reasons": " | ".join(reasons),
+            "n_reasons": len(reasons),
+            "career_timeline_anomaly": int(f.career_timeline_anomaly),
+            "expert_with_zero_duration": int(f.expert_with_zero_duration),
+            "title_skills_history_mismatch": int(f.title_skills_history_mismatch),
+            "employment_overlap_anomaly": int(f.employment_overlap_anomaly),
+            "duration_integrity_violation": int(f.duration_integrity_violation),
+            "title_responsibility_mismatch": int(f.title_responsibility_mismatch),
+            "skill_experience_contradiction": int(f.skill_experience_contradiction),
+            "education_timeline_anomaly": int(f.education_timeline_anomaly),
+            "career_progression_anomaly": int(f.career_progression_anomaly),
+            "achievement_inflation": int(f.achievement_inflation),
+            "technology_age_anomaly": int(f.technology_age_anomaly),
+            "synthetic_profile": int(f.synthetic_profile),
+            "cross_field_inconsistency": int(f.cross_field_inconsistency),
+            "nlp_claim_without_evidence": int(f.nlp_claim_without_evidence),
+            "ai_skill_count": f.ai_skill_count,
+            "pre_llm_roles": f.pre_llm_roles,
+            "num_career_entries": len(f.career_history),
+        })
+    output.write_honeypots(honeypot_csv_rows, honeypot_path)
+    print(f"[ranker] wrote {honeypot_path} ({len(honeypot_csv_rows)} honeypots)")
 
     # Get top-K
     top_unpacked = topk.top_unpacked()  # [(cid, score, offset), ...]
@@ -225,6 +270,7 @@ def run(candidates_path: str | Path, out_path: str | Path, top_k: int = config.T
         "n_title_chaser": n_title_chaser,
         "runtime_seconds": total,
         "out_path": str(out_path),
+        "honeypot_path": str(honeypot_path),
     }
     print(f"[ranker] done in {total:.1f}s")
     return stats

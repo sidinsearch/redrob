@@ -90,14 +90,27 @@ def detect_title_chaser(f: Features) -> bool:
 # ----------------------------------------------------------------------------
 
 def is_honeypot(f: Features) -> bool:
-    """Return True if candidate is a forced-zero honeypot."""
-    if f.career_timeline_anomaly:
-        return True
-    if f.expert_with_zero_duration:
-        return True
-    if f.title_skills_history_mismatch:
-        return True
-    return False
+    """Return True if candidate is a forced-zero honeypot.
+
+    We check 13 patterns. Any single positive flag forces the candidate to
+    the bottom of the ranking. Reasons are reported in honeypot_reasons.
+    """
+    return any([
+        f.career_timeline_anomaly,
+        f.expert_with_zero_duration,
+        f.title_skills_history_mismatch,
+        f.employment_overlap_anomaly,
+        f.duration_integrity_violation,
+        f.title_responsibility_mismatch,
+        f.skill_experience_contradiction,
+        f.education_timeline_anomaly,
+        f.career_progression_anomaly,
+        f.achievement_inflation,
+        f.technology_age_anomaly,
+        f.synthetic_profile,
+        f.cross_field_inconsistency,
+        f.nlp_claim_without_evidence,
+    ])
 
 
 # ----------------------------------------------------------------------------
@@ -144,7 +157,7 @@ def analyze(f: Features) -> TrapInfo:
         # Floor (except for honeypots which are forced to bottom)
         multiplier = max(multiplier, config.TRAP_FLOOR)
 
-    # Reasons
+    # Reasons — 13 honeypot patterns
     reasons = []
     if f.career_timeline_anomaly:
         reasons.append("career timeline impossible (YoE > career span)")
@@ -152,6 +165,28 @@ def analyze(f: Features) -> TrapInfo:
         reasons.append(f"expert in {config.EXPERT_SKILL_FAKE_THRESHOLD}+ skills with 0 months use")
     if f.title_skills_history_mismatch:
         reasons.append("AI title with no AI skills or AI history")
+    if f.employment_overlap_anomaly:
+        reasons.append(">3 concurrent overlapping jobs")
+    if f.duration_integrity_violation:
+        reasons.append("invalid job duration (negative or >50yr)")
+    if f.title_responsibility_mismatch:
+        reasons.append("AI/ML title but 0 AI/ML keywords in any job description")
+    if f.skill_experience_contradiction:
+        reasons.append("advanced+ proficiency in 3+ skills with near-zero duration")
+    if f.education_timeline_anomaly:
+        reasons.append("education timeline impossible (degree before age 18 or after career start)")
+    if f.career_progression_anomaly:
+        reasons.append("implausible career progression (3+ title-level jumps in 2yr)")
+    if f.achievement_inflation:
+        reasons.append(f"{config.HONEYPOT_ACHIEVEMENT_INFLATION_MIN}+ inflation keywords with no metrics")
+    if f.technology_age_anomaly:
+        reasons.append("skill expertise predates the technology's release")
+    if f.synthetic_profile:
+        reasons.append("synthetic profile (many AI skills, low YoE, few jobs)")
+    if f.cross_field_inconsistency:
+        reasons.append("field mismatch (e.g. NLP title with 0 NLP in skills/career)")
+    if f.nlp_claim_without_evidence:
+        reasons.append("says no NLP experience but lists NLP skills (self-contradiction)")
     if is_ks:
         reasons.append("keyword stuffer (no foundational ML)")
     if is_ts:

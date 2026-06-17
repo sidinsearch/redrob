@@ -230,13 +230,15 @@ def rank_with_weights(
     candidates: List[dict],
     weights: Dict[str, float],
     top_k: int = 100
-) -> tuple[List[dict], Dict[str, Any]]:
-    """Rank candidates with custom weights. Returns (rows, stats)."""
-    
+) -> tuple[List[dict], Dict[str, Any], List[dict]]:
+    """Rank candidates with custom weights. Returns (rows, stats, honeypots).
+
+    honeypots: list of dicts with full details of every detected honeypot.
+    """
     # Update config weights temporarily
     original_weights = config.WEIGHTS.copy()
     config.WEIGHTS.update(weights)
-    
+
     try:
         scored = []
         trap_stats = {
@@ -247,14 +249,43 @@ def rank_with_weights(
             "total_title_chaser": 0,
             "total_clean": 0,
         }
-        
+        honeypot_rows: List[dict] = []
+
         for cand in candidates:
             f = extract_features(cand)
             t = analyze(f)
-            
+
             # Count traps
             if t.is_honeypot:
                 trap_stats["total_honeypots"] += 1
+                # Capture full honeypot details
+                honeypot_rows.append({
+                    "candidate_id": f.candidate_id,
+                    "current_title": f.current_title,
+                    "current_company": f.current_company,
+                    "years_of_experience": f.years_of_experience,
+                    "location": f.location,
+                    "country": f.country,
+                    "honeypot_reasons": " | ".join(t.honeypot_reasons),
+                    "n_reasons": len(t.honeypot_reasons),
+                    "career_timeline_anomaly": int(f.career_timeline_anomaly),
+                    "expert_with_zero_duration": int(f.expert_with_zero_duration),
+                    "title_skills_history_mismatch": int(f.title_skills_history_mismatch),
+                    "employment_overlap_anomaly": int(f.employment_overlap_anomaly),
+                    "duration_integrity_violation": int(f.duration_integrity_violation),
+                    "title_responsibility_mismatch": int(f.title_responsibility_mismatch),
+                    "skill_experience_contradiction": int(f.skill_experience_contradiction),
+                    "education_timeline_anomaly": int(f.education_timeline_anomaly),
+                    "career_progression_anomaly": int(f.career_progression_anomaly),
+                    "achievement_inflation": int(f.achievement_inflation),
+                    "technology_age_anomaly": int(f.technology_age_anomaly),
+                    "synthetic_profile": int(f.synthetic_profile),
+                    "cross_field_inconsistency": int(f.cross_field_inconsistency),
+                    "nlp_claim_without_evidence": int(f.nlp_claim_without_evidence),
+                    "ai_skill_count": f.ai_skill_count,
+                    "pre_llm_roles": f.pre_llm_roles,
+                    "num_career_entries": len(f.career_history),
+                })
             if t.is_keyword_stuffer:
                 trap_stats["total_keyword_stuffers"] += 1
             if t.is_template_summary:
@@ -266,14 +297,14 @@ def rank_with_weights(
             if not any([t.is_honeypot, t.is_keyword_stuffer, t.is_template_summary,
                        t.is_consulting_only, t.is_title_chaser]):
                 trap_stats["total_clean"] += 1
-            
+
             score = compute_score(f, t)
             scored.append((score, cand.get("candidate_id", ""), cand, f, t))
-        
+
         # Sort and take top-K
         scored.sort(key=lambda x: (-x[0], x[1]))
         top = scored[:top_k]
-        
+
         # Build output rows
         rows = []
         for rank, (score, cid, cand, f, t) in enumerate(top, start=1):
@@ -287,11 +318,11 @@ def rank_with_weights(
                 "traps": t,
                 "candidate": cand,
             })
-        
+
         trap_stats["in_topk"] = sum(1 for r in rows if r["traps"].is_honeypot)
-        
-        return rows, trap_stats
-    
+
+        return rows, trap_stats, honeypot_rows
+
     finally:
         # Restore original weights
         config.WEIGHTS.clear()
@@ -443,7 +474,7 @@ def main():
 
     with st.spinner(f"Ranking {len(candidates):,} candidates..."):
         t0 = time.perf_counter()
-        rows, trap_stats = rank_with_weights(candidates, weights, top_k=top_k)
+        rows, trap_stats, honeypot_rows = rank_with_weights(candidates, weights, top_k=top_k)
         elapsed = time.perf_counter() - t0
 
     # Metrics row
@@ -459,12 +490,13 @@ def main():
     # Tabs for different views
     # ----------------------------------------------------------------------------
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📋 Top Candidates",
         "🛡️ Trap Analysis",
         "📊 Score Breakdown",
         "🔍 Candidate Drill-down",
-        "⚖️ Fairness Audit"
+        "⚖️ Fairness Audit",
+        "🍯 Honeypots"
     ])
 
 
@@ -868,6 +900,104 @@ def main():
         col2.metric("Countries", len(country_counts))
         col3.metric("Education Tiers", len(tier_counts))
         col4.metric("Avg Score", f"{sum(r['score'] for r in rows) / len(rows):.3f}")
+
+
+    # ----------------------------------------------------------------------------
+    # Tab 6: Honeypots
+    # ----------------------------------------------------------------------------
+    with tab6:
+        st.markdown("### 🍯 Honeypot Detection Report")
+        st.caption("Candidates with impossibly wrong profiles. These are forced to the bottom of the ranking (score = -1e9).")
+        n_hp = len(honeypot_rows)
+        if n_hp == 0:
+            st.success("🎉 No honeypots detected in the candidate pool!")
+        else:
+            # Top-line metrics
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Total Honeypots", f"{n_hp:,}")
+            col2.metric("Honeypot Rate", f"{n_hp / max(1, len(candidates)) * 100:.2f}%")
+            col3.metric("In Top-100", "0" if trap_stats.get("in_topk", 0) == 0 else f"{trap_stats['in_topk']}")
+            col4.metric("Detectors Active", f"{sum(1 for k in ['career_timeline_anomaly','expert_with_zero_duration','title_skills_history_mismatch','employment_overlap_anomaly','duration_integrity_violation','title_responsibility_mismatch','skill_experience_contradiction','education_timeline_anomaly','career_progression_anomaly','achievement_inflation','technology_age_anomaly','synthetic_profile','cross_field_inconsistency','nlp_claim_without_evidence'] if any(r.get(k, 0) for r in honeypot_rows))}/14")
+
+            # Detector breakdown
+            st.markdown("#### Detection breakdown")
+            detector_cols = {
+                "Career Timeline": "career_timeline_anomaly",
+                "Expert w/ 0 Duration": "expert_with_zero_duration",
+                "Title-Skills Mismatch": "title_skills_history_mismatch",
+                "Employment Overlap": "employment_overlap_anomaly",
+                "Duration Integrity": "duration_integrity_violation",
+                "Title-Responsibility": "title_responsibility_mismatch",
+                "Skill-Experience": "skill_experience_contradiction",
+                "Education Timeline": "education_timeline_anomaly",
+                "Career Progression": "career_progression_anomaly",
+                "Achievement Inflation": "achievement_inflation",
+                "Tech Age Anomaly": "technology_age_anomaly",
+                "Synthetic Profile": "synthetic_profile",
+                "Cross-Field Inconsistent": "cross_field_inconsistency",
+                "NLP Self-Contradiction": "nlp_claim_without_evidence",
+            }
+            counts = {label: sum(1 for r in honeypot_rows if r.get(col, 0)) for label, col in detector_cols.items()}
+            # Render as a small bar chart
+            count_df = pd.DataFrame({"Detector": list(counts.keys()), "Count": list(counts.values())}).sort_values("Count", ascending=False)
+            count_df = count_df[count_df["Count"] > 0]
+            if not count_df.empty:
+                fig = px.bar(count_df, x="Count", y="Detector", orientation="h", color="Count", color_continuous_scale="Reds")
+                fig.update_layout(height=350, showlegend=False, yaxis={"autorange": "reversed"})
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No individual detector fires — check the candidate set.")
+
+            # Full honeypot table
+            st.markdown(f"#### Full honeypot details ({n_hp:,} candidates)")
+            display_df = pd.DataFrame(honeypot_rows)
+            # Show key columns by default
+            show_cols = ["candidate_id", "current_title", "current_company", "years_of_experience",
+                         "country", "n_reasons", "honeypot_reasons"]
+            available = [c for c in show_cols if c in display_df.columns]
+            st.dataframe(display_df[available], use_container_width=True, height=400)
+
+            # Download honeypots.csv
+            csv_buf = io.StringIO()
+            display_df.to_csv(csv_buf, index=False)
+            st.download_button(
+                label="📥 Download honeypots.csv",
+                data=csv_buf.getvalue(),
+                file_name="honeypots.csv",
+                mime="text/csv",
+            )
+
+            # Drill-down on a single honeypot
+            st.markdown("#### Honeypot drill-down")
+            selected_hp = st.selectbox(
+                "Inspect a honeypot",
+                options=[r["candidate_id"] for r in honeypot_rows[:200]] if len(honeypot_rows) > 200 else [r["candidate_id"] for r in honeypot_rows],
+                key="honeypot_select",
+            )
+            if selected_hp:
+                hp_record = next((r for r in honeypot_rows if r["candidate_id"] == selected_hp), None)
+                if hp_record:
+                    st.markdown(f"**{hp_record['current_title']}** at **{hp_record['current_company']}** — {hp_record['years_of_experience']} YoE ({hp_record.get('location', '')}, {hp_record.get('country', '')})")
+                    reasons = hp_record.get("honeypot_reasons", "")
+                    if reasons:
+                        st.error(f"**Why flagged:** {reasons}")
+                    # Show the 14 flags as a small badge grid
+                    active_flags = [label for label, col in detector_cols.items() if hp_record.get(col, 0)]
+                    if active_flags:
+                        st.markdown("**Active detectors:**")
+                        st.write(", ".join(f"`{f}`" for f in active_flags))
+                    # Find the full candidate record to show career/skills
+                    full_cand = next((c for c in candidates if c.get("candidate_id") == selected_hp), None)
+                    if full_cand:
+                        with st.expander("Full profile"):
+                            st.json({
+                                "current_title": full_cand.get("profile", {}).get("current_title"),
+                                "current_company": full_cand.get("profile", {}).get("current_company"),
+                                "years_of_experience": full_cand.get("profile", {}).get("years_of_experience"),
+                                "summary": (full_cand.get("profile", {}).get("summary") or "")[:500],
+                                "num_skills": len(full_cand.get("skills", [])),
+                                "num_career_entries": len(full_cand.get("career_history", [])),
+                            })
 
 
     # ----------------------------------------------------------------------------

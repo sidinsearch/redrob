@@ -105,10 +105,26 @@ class Features:
     # Trap flags
     template_summary_match: bool = False
 
-    # Honeypot flags
+    # Honeypot flags (10 new detectors added)
     career_timeline_anomaly: bool = False
     expert_with_zero_duration: bool = False
     title_skills_history_mismatch: bool = False
+    # New detectors
+    duration_integrity_violation: bool = False
+    skill_experience_contradiction: bool = False
+    education_timeline_anomaly: bool = False
+    career_progression_anomaly: bool = False
+    achievement_inflation: bool = False
+    technology_age_anomaly: bool = False
+    synthetic_profile: bool = False
+    cross_field_inconsistency: bool = False
+    employment_overlap_anomaly: bool = False
+    title_responsibility_mismatch: bool = False
+    nlp_claim_without_evidence: bool = False
+
+    # Pre-LLM signal (boost for pre-2020 retrieval/ranking/ML production work)
+    pre_llm_signal: float = 0.0
+    pre_llm_roles: int = 0
 
     # Pre-built blob for fast matching (career_relevance uses this)
     search_blob: str = ""
@@ -209,6 +225,7 @@ def _analyze_skills(skills: list) -> dict:
         "has_ranking_skills": False,
         "has_llm_buzzwords_only": False,
         "max_skill_proficiency": "beginner",
+        "ai_skills_depth": 0.0,
     }
     if not skills:
         return out
@@ -477,15 +494,28 @@ def _detect_honeypot_signals(
 ) -> None:
     """Mutates features in-place to set honeypot flags.
 
-    Honeypots are impossibly wrong profiles. We check three patterns:
+    Honeypots are impossibly wrong profiles. We check 13 patterns:
 
-    1. Career timeline anomaly: YoE > (current_company_start_year - earliest_career_start) + buffer.
+    Existing (3):
+    1. Career timeline anomaly: YoE > (career span + buffer).
     2. Expert with zero duration: "expert" in 5+ skills but 0 months of use.
     3. Title-skills-history mismatch: "Senior AI Engineer" with 0 AI skills AND no AI history.
+
+    New (10):
+    4.  Employment timeline validation: >3 concurrent overlapping jobs.
+    5.  Duration integrity: jobs with negative or >600-month duration.
+    6.  Job title vs responsibility consistency: AI title, 0 AI keywords in any desc.
+    7.  Skill-experience consistency: advanced+proficiency with 0 months usage.
+    8.  Education timeline: degree end_year before age 18.
+    9.  Career progression: >3 title-level jumps in <2 years (implausible promotions).
+    10. Achievement validation: 3+ inflation keywords with no metrics.
+    11. Technology age: skill used before it was released.
+    12. Synthetic profile: 8+ AI skills + <4 YoE + <3 jobs + high completeness.
+    13. Cross-field consistency: claims NLP title + 0 NLP in skills/career.
+    14. NLP-claim-without-evidence: "no NLP" in summary, but NLP skills (the contradiction).
     """
-    # 1. Career timeline anomaly
+    # ----- 1. Career timeline anomaly -----
     yoe = profile.get("years_of_experience", 0) or 0
-    # Compute total career span
     if career_history:
         starts = []
         for c in career_history:
@@ -498,11 +528,10 @@ def _detect_honeypot_signals(
         if starts:
             earliest = min(starts)
             span_years = (date.today() - earliest).days / 365.25
-            # If YoE claims more than (career span + 5yr), it's impossible
             if yoe > span_years + config.HONEYPOT_YOE_BUFFER_YEARS:
                 features.career_timeline_anomaly = True
 
-    # 2. Expert with zero duration
+    # ----- 2. Expert with zero duration -----
     expert_count = 0
     for s in skills:
         if not isinstance(s, dict):
@@ -514,7 +543,7 @@ def _detect_honeypot_signals(
     if expert_count >= config.EXPERT_SKILL_FAKE_THRESHOLD:
         features.expert_with_zero_duration = True
 
-    # 3. Title-skills-history mismatch
+    # ----- 3. Title-skills-history mismatch -----
     title_lc = (profile.get("current_title", "") or "").lower()
     has_ai_title = any(
         kw in title_lc for kw in [
@@ -524,7 +553,6 @@ def _detect_honeypot_signals(
         ]
     )
     if has_ai_title:
-        # Check if the profile has any real AI signal
         if (
             not features.has_foundational_ml
             and not features.has_ranking_skills
@@ -532,6 +560,328 @@ def _detect_honeypot_signals(
             and features.ai_skill_count == 0
         ):
             features.title_skills_history_mismatch = True
+
+    # ----- 4. Employment overlap (>3 concurrent jobs at any time) -----
+    if career_history and len(career_history) >= 4:
+        intervals = []
+        for c in career_history:
+            s = c.get("start_date", "")
+            e = c.get("end_date", "") or ""
+            try:
+                s_date = date.fromisoformat(s) if s else None
+            except (ValueError, TypeError):
+                s_date = None
+            if s_date is None:
+                continue
+            if not e:
+                e_date = date.today()
+            else:
+                try:
+                    e_date = date.fromisoformat(e)
+                except (ValueError, TypeError):
+                    e_date = date.today()
+            intervals.append((s_date, e_date))
+        if len(intervals) >= 4:
+            # Sort by start, sweep — count max concurrent.
+            intervals.sort()
+            max_concurrent = 0
+            for i, (s, e) in enumerate(intervals):
+                concurrent = sum(1 for s2, e2 in intervals if s2 <= s <= e2)
+                max_concurrent = max(max_concurrent, concurrent)
+            if max_concurrent > config.HONEYPOT_OVERLAP_MAX_JOBS:
+                features.employment_overlap_anomaly = True
+
+    # ----- 5. Duration integrity (negative or >50yr) -----
+    for c in career_history:
+        dur = c.get("duration_months", 0) or 0
+        if isinstance(dur, (int, float)):
+            if dur < 0 or dur > 600:  # 50 years at one company
+                features.duration_integrity_violation = True
+                break
+        # Also check end_date < start_date
+        s = c.get("start_date", "")
+        e = c.get("end_date", "") or ""
+        if s and e:
+            try:
+                sd = date.fromisoformat(s)
+                ed = date.fromisoformat(e)
+                if ed < sd:
+                    features.duration_integrity_violation = True
+                    break
+            except (ValueError, TypeError):
+                pass
+
+    # ----- 6. Job title vs responsibility consistency -----
+    # If the current title claims AI/ML but no AI/ML keywords in any job desc.
+    if has_ai_title and career_history:
+        ai_resp_count = 0
+        for c in career_history:
+            desc = (c.get("description") or "").lower()
+            for kw in config.CAREER_AI_KEYWORDS:
+                if kw in desc:
+                    ai_resp_count += 1
+                    break
+        if ai_resp_count == 0:
+            features.title_responsibility_mismatch = True
+
+    # ----- 7. Skill-experience consistency (advanced+ with 0 months) -----
+    adv_no_dur = 0
+    for s in skills:
+        if not isinstance(s, dict):
+            continue
+        prof = (s.get("proficiency") or "").lower()
+        dur = s.get("duration_months", 0) or 0
+        if prof in ("advanced", "expert") and (not isinstance(dur, (int, float)) or dur < config.HONEYPOT_ADV_NO_DURATION_MONTHS):
+            adv_no_dur += 1
+    if adv_no_dur >= 3:  # 3+ advanced+ with near-zero duration = suspicious
+        features.skill_experience_contradiction = True
+
+    # ----- 8. Education timeline (degree before age 18) -----
+    education = profile.get("education", []) or []
+    if not education and career_history:
+        # try candidate's education (it's at top level)
+        pass
+    # We need education from outside profile (passed in differently).
+    # Skip here — handled in extract_features via separate call.
+
+    # ----- 9. Career progression (3+ level jumps in 1 year, same track) -----
+    # Same-track means both titles match the engineering ladder or both
+    # match the management ladder. Cross-track moves (engineer → manager)
+    # are not "promotions", they're role changes.
+    ENG_LEVELS = {
+        "intern": 0, "junior": 1, "associate": 1, "engineer": 2, "senior": 3,
+        "staff": 4, "principal": 5, "fellow": 6, "distinguished": 6,
+    }
+    MGT_LEVELS = {
+        "manager": 0, "senior manager": 1, "director": 2, "senior director": 3,
+        "vp": 4, "head": 2, "chief": 4, "lead": 0, "team lead": 0,
+    }
+    def _track_and_level(title: str):
+        t = title.lower()
+        eng = max((v for k, v in ENG_LEVELS.items() if k in t), default=None)
+        mgt = max((v for k, v in MGT_LEVELS.items() if k in t), default=None)
+        if eng is not None and (mgt is None or eng >= mgt):
+            return "eng", eng
+        if mgt is not None:
+            return "mgt", mgt
+        return None, 0
+
+    if career_history and len(career_history) >= 3:
+        sorted_jobs = []
+        for c in career_history:
+            s = c.get("start_date", "")
+            try:
+                sd = date.fromisoformat(s) if s else None
+            except (ValueError, TypeError):
+                sd = None
+            if sd:
+                sorted_jobs.append((sd, (c.get("title") or "").lower()))
+        sorted_jobs.sort()
+        # Slide a 1-year window and count level jumps within the same track.
+        for i in range(len(sorted_jobs)):
+            base_date, base_title = sorted_jobs[i]
+            base_track, base_level = _track_and_level(base_title)
+            if base_track is None:
+                continue
+            for j in range(i + 1, len(sorted_jobs)):
+                jd, jt = sorted_jobs[j]
+                if (jd - base_date).days > 365:  # 1 year
+                    break
+                jt_track, jl = _track_and_level(jt)
+                if jt_track != base_track:
+                    continue  # cross-track = not a promotion
+                if jl - base_level >= 3:  # 3+ levels in 1yr = implausible
+                    features.career_progression_anomaly = True
+                    break
+            if features.career_progression_anomaly:
+                break
+
+    # ----- 10. Achievement validation (3+ inflation markers, no numbers) -----
+    summary = (profile.get("summary") or "").lower()
+    all_text = summary
+    for c in career_history:
+        all_text += " " + (c.get("description") or "").lower()
+    inflation_hits = sum(1 for kw in config.HONEYPOT_ACHIEVEMENT_INFLATION_KEYWORDS if kw in all_text)
+    # Check for any numeric metric (%, x improvement, scaling numbers)
+    import re as _re
+    has_numbers = bool(_re.search(r"\b\d+(\.\d+)?%|\b\d+x\s+(faster|improvement|more)|\b\d+\s*(users|customers|requests|qps|rps)", all_text))
+    if inflation_hits >= config.HONEYPOT_ACHIEVEMENT_INFLATION_MIN and not has_numbers:
+        features.achievement_inflation = True
+
+    # ----- 11. Technology age (skill before release) -----
+    # A skill is "anachronistic" if the candidate could not plausibly have
+    # used it: their career started before the tech was released AND the
+    # skill's duration_months is short enough that it still wouldn't fit.
+    # We allow ±1 year grace and only flag when both the career start and
+    # the skill window are too early.
+    if career_history:
+        earliest_year = None
+        for c in career_history:
+            s = c.get("start_date", "")
+            try:
+                sd = date.fromisoformat(s) if s else None
+            except (ValueError, TypeError):
+                sd = None
+            if sd:
+                earliest_year = sd.year if earliest_year is None else min(earliest_year, sd.year)
+        if earliest_year:
+            current_year = date.today().year
+            for s in skills:
+                if not isinstance(s, dict):
+                    continue
+                name = (s.get("name") or "").lower().strip()
+                # Compute the year the skill could first have been used.
+                # If duration_months is given, the skill window starts
+                # max(earliest_year, current_year - ceil(duration/12)).
+                dur_months = s.get("duration_months", 0) or 0
+                if isinstance(dur_months, (int, float)) and dur_months > 0:
+                    skill_start_year = current_year - int(dur_months // 12)
+                else:
+                    skill_start_year = earliest_year
+                skill_start_year = max(skill_start_year, earliest_year)
+                for tech, release_year in config.TECH_RELEASE_YEARS.items():
+                    if tech in name:
+                        # Flag only if the skill window still starts before release.
+                        if skill_start_year < release_year - 1:
+                            features.technology_age_anomaly = True
+                            break
+                if features.technology_age_anomaly:
+                    break
+
+    # ----- 12. Synthetic profile (8+ AI skills, <4 YoE, <3 jobs, high completeness) -----
+    if (
+        features.ai_skill_count >= config.HONEYPOT_SYNTHETIC_PROFILE_MIN_AI_SKILLS
+        and yoe < config.HONEYPOT_SYNTHETIC_PROFILE_MAX_YOE
+        and len(career_history) <= config.HONEYPOT_SYNTHETIC_PROFILE_MAX_HISTORY
+        and features.profile_completeness >= config.HONEYPOT_SYNTHETIC_PROFILE_MIN_COMPLETENESS
+    ):
+        features.synthetic_profile = True
+
+    # ----- 13. Cross-field consistency (NLP title + no NLP anywhere) -----
+    if "nlp" in title_lc or "natural language" in title_lc:
+        # Check skills for any NLP keyword
+        has_nlp_skill = False
+        for s in skills:
+            if not isinstance(s, dict):
+                continue
+            n = (s.get("name") or "").lower()
+            if any(kw in n for kw in config.NLP_KEYWORDS):
+                has_nlp_skill = True
+                break
+        # Check career descs
+        has_nlp_career = False
+        for c in career_history:
+            desc = (c.get("description") or "").lower()
+            if any(kw in desc for kw in config.NLP_KEYWORDS):
+                has_nlp_career = True
+                break
+        if not has_nlp_skill and not has_nlp_career:
+            features.cross_field_inconsistency = True
+
+    # ----- 14. NLP-claim-without-evidence (the contradiction case) -----
+    # User said: "candidate was saying he has no experience in NLP and want to
+    # transition into it. Yet we selected him in the top 100 and gave reason that
+    # he knows NLP." This is a self-contradiction.
+    # Detection: summary explicitly says "no experience in NLP" / "no NLP" / "no background
+    # in NLP" but skills list NLP, OR vice versa.
+    summary_lc = summary
+    nlp_negation_patterns = [
+        "no experience in nlp", "no nlp experience", "no background in nlp",
+        "no nlp background", "new to nlp", "transition into nlp",
+        "transition to nlp", "no hands-on nlp", "no nlp",
+    ]
+    says_no_nlp = any(pat in summary_lc for pat in nlp_negation_patterns)
+    has_nlp_skill = False
+    for s in skills:
+        if not isinstance(s, dict):
+            continue
+        n = (s.get("name") or "").lower()
+        if any(kw in n for kw in config.NLP_KEYWORDS):
+            has_nlp_skill = True
+            break
+    if says_no_nlp and has_nlp_skill:
+        features.nlp_claim_without_evidence = True
+
+
+def _detect_education_timeline_honeypot(candidate: dict, profile: dict, features: Features) -> None:
+    """Detect education-timeline anomalies.
+
+    Education lives at the candidate top-level (not inside profile). We only
+    flag truly impossible timelines:
+    - Degree end_year in the future.
+    - Degree start_year > end_year.
+    - Degree end_year before the candidate could have plausibly finished
+      (e.g. end_year - birth_year < 18, only if birth_year is given).
+
+    We do NOT flag "career started long after degree ended" because that's a
+    normal pattern in this dataset (synthetic data generation quirk) and in
+    real life (career break, further study, etc.).
+    """
+    education = candidate.get("education") or []
+    if not education:
+        return
+    birth_year = None
+    by = candidate.get("birth_year")
+    if isinstance(by, (int, float)) and by > 1900:
+        birth_year = int(by)
+    for e in education:
+        if not isinstance(e, dict):
+            continue
+        end_year = e.get("end_year")
+        start_year = e.get("start_year")
+        if not isinstance(end_year, int):
+            continue
+        # Future end_year.
+        if end_year > date.today().year:
+            features.education_timeline_anomaly = True
+            return
+        # start > end (impossible).
+        if isinstance(start_year, int) and start_year > end_year:
+            features.education_timeline_anomaly = True
+            return
+        # Age-based check (only if birth_year known).
+        if birth_year and end_year - birth_year < config.HONEYPOT_EDU_AGE_MIN:
+            features.education_timeline_anomaly = True
+            return
+
+
+def _compute_pre_llm_signal(career_history: list, skills: list, features: Features) -> None:
+    """Boost for pre-2020 production experience in retrieval/ranking/ML.
+
+    JD: "people who understood retrieval and ranking before it became
+    fashionable". We detect this by counting career roles that started
+    before 2020 and contain retrieval/ranking/ML keywords in description.
+    """
+    if not career_history:
+        return
+    pre_llm_roles = 0
+    for c in career_history:
+        s = c.get("start_date", "")
+        try:
+            sd = date.fromisoformat(s) if s else None
+        except (ValueError, TypeError):
+            sd = None
+        if sd is None or sd.year >= config.PRE_LLM_CUTOFF_YEAR:
+            continue
+        desc = (c.get("description") or "").lower()
+        title = (c.get("title") or "").lower()
+        combined = desc + " " + title
+        # Pre-LLM signals: classic IR, classical ML, embeddings, ranking.
+        keywords = (
+            config.CAREER_AI_KEYWORDS
+            + ["information retrieval", "search engine", "search ranking",
+               "relevance", "learning to rank", "bm25", "tf-idf", "tfidf",
+               "word2vec", "glove", "fasttext", "lda", "topic modeling",
+               "collaborative filtering", "matrix factorization", "embeddings",
+               "word embeddings", "doc2vec", "elasticsearch", "solr", "lucene",
+               "recommender", "recommendation system"]
+        )
+        if any(kw in combined for kw in keywords):
+            pre_llm_roles += 1
+    features.pre_llm_roles = pre_llm_roles
+    # Normalize: 2+ pre-LLM roles = max signal.
+    raw = min(1.0, pre_llm_roles / 2.0)
+    features.pre_llm_signal = raw * config.PRE_LLM_BOOST_MAX
 
 
 # ----------------------------------------------------------------------------
@@ -632,5 +982,11 @@ def extract_features(candidate: dict) -> Features:
 
     # Honeypot detection (mutates f)
     _detect_honeypot_signals(profile, career_history, skills, f)
+
+    # Education-timeline honeypot (education lives at top level, not profile)
+    _detect_education_timeline_honeypot(candidate, profile, f)
+
+    # Pre-LLM signal (pre-2020 retrieval/ranking production work)
+    _compute_pre_llm_signal(career_history, skills, f)
 
     return f
