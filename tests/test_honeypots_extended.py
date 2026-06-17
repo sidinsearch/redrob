@@ -33,26 +33,29 @@ def _analyze(cand):
 
 
 def test_synthetic_profile():
-    """8+ AI skills, <4 YoE, <3 jobs, high completeness → synthetic."""
+    """12+ AI skills, <2 YoE, 1 job, 90+ completeness → synthetic."""
     cand = _make_candidate(
-        profile={"years_of_experience": 3.0, "current_title": "AI Engineer"},
+        profile={"years_of_experience": 1.5, "current_title": "AI Engineer"},
         career=[
-            {"company": "StartupX", "title": "AI Engineer", "start_date": "2023-01-01",
-             "end_date": None, "duration_months": 36, "description": "Built things."},
+            {"company": "StartupX", "title": "AI Engineer", "start_date": "2024-09-01",
+             "end_date": None, "duration_months": 18, "description": "Built things."},
         ],
         skills=[
-            {"name": "PyTorch", "proficiency": "advanced", "endorsements": 5, "duration_months": 24},
-            {"name": "TensorFlow", "proficiency": "advanced", "endorsements": 5, "duration_months": 24},
-            {"name": "LLMs", "proficiency": "advanced", "endorsements": 5, "duration_months": 18},
+            {"name": "PyTorch", "proficiency": "advanced", "endorsements": 5, "duration_months": 12},
+            {"name": "TensorFlow", "proficiency": "advanced", "endorsements": 5, "duration_months": 12},
+            {"name": "LLMs", "proficiency": "advanced", "endorsements": 5, "duration_months": 12},
             {"name": "RAG", "proficiency": "advanced", "endorsements": 5, "duration_months": 12},
             {"name": "Pinecone", "proficiency": "advanced", "endorsements": 5, "duration_months": 12},
             {"name": "LangChain", "proficiency": "advanced", "endorsements": 5, "duration_months": 12},
             {"name": "Embeddings", "proficiency": "advanced", "endorsements": 5, "duration_months": 12},
             {"name": "Vector Search", "proficiency": "advanced", "endorsements": 5, "duration_months": 12},
             {"name": "FAISS", "proficiency": "advanced", "endorsements": 5, "duration_months": 12},
+            {"name": "LLamaIndex", "proficiency": "advanced", "endorsements": 5, "duration_months": 12},
+            {"name": "Sentence Transformers", "proficiency": "advanced", "endorsements": 5, "duration_months": 12},
+            {"name": "Hugging Face Transformers", "proficiency": "advanced", "endorsements": 5, "duration_months": 12},
         ],
     )
-    cand["redrob_signals"]["profile_completeness_score"] = 90.0
+    cand["redrob_signals"]["profile_completeness_score"] = 92.0
     f, t = _analyze(cand)
     assert f.synthetic_profile, f"Expected synthetic_profile, got {f.synthetic_profile}"
     assert t.is_honeypot
@@ -99,7 +102,7 @@ def test_title_responsibility_mismatch():
 
 
 def test_skill_experience_contradiction():
-    """Advanced+ proficiency in 3+ skills with near-zero duration."""
+    """Advanced+ proficiency in 5+ skills with near-zero duration and zero endorsements."""
     cand = _make_candidate(
         profile={"years_of_experience": 5.0, "current_title": "ML Engineer"},
         career=[
@@ -111,6 +114,8 @@ def test_skill_experience_contradiction():
             {"name": "PyTorch", "proficiency": "advanced", "endorsements": 0, "duration_months": 0},
             {"name": "TensorFlow", "proficiency": "expert", "endorsements": 0, "duration_months": 1},
             {"name": "XGBoost", "proficiency": "advanced", "endorsements": 0, "duration_months": 0},
+            {"name": "scikit-learn", "proficiency": "advanced", "endorsements": 0, "duration_months": 2},
+            {"name": "Keras", "proficiency": "expert", "endorsements": 0, "duration_months": 0},
         ],
     )
     f, t = _analyze(cand)
@@ -174,13 +179,13 @@ def test_education_timeline_anomaly():
 
 
 def test_employment_overlap_anomaly():
-    """4+ concurrent jobs at same time."""
+    """6+ concurrent jobs at same time."""
     cand = _make_candidate(
         profile={"years_of_experience": 5.0, "current_title": "Engineer"},
         career=[
             {"company": f"C{i}", "title": "Engineer", "start_date": "2022-01-01",
              "end_date": "2024-01-01", "duration_months": 24,
-             "description": "Worked at C{i}."} for i in range(5)
+             "description": "Worked at C{i}."} for i in range(7)
         ],
     )
     f, t = _analyze(cand)

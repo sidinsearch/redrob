@@ -561,8 +561,8 @@ def _detect_honeypot_signals(
         ):
             features.title_skills_history_mismatch = True
 
-    # ----- 4. Employment overlap (>3 concurrent jobs at any time) -----
-    if career_history and len(career_history) >= 4:
+    # ----- 4. Employment overlap (>5 concurrent jobs at any time) -----
+    if career_history and len(career_history) >= config.HONEYPOT_OVERLAP_MAX_JOBS + 1:
         intervals = []
         for c in career_history:
             s = c.get("start_date", "")
@@ -581,8 +581,7 @@ def _detect_honeypot_signals(
                 except (ValueError, TypeError):
                     e_date = date.today()
             intervals.append((s_date, e_date))
-        if len(intervals) >= 4:
-            # Sort by start, sweep — count max concurrent.
+        if len(intervals) >= config.HONEYPOT_OVERLAP_MAX_JOBS + 1:
             intervals.sort()
             max_concurrent = 0
             for i, (s, e) in enumerate(intervals):
@@ -592,13 +591,15 @@ def _detect_honeypot_signals(
                 features.employment_overlap_anomaly = True
 
     # ----- 5. Duration integrity (negative or >50yr) -----
+    # Stricter: only flag truly impossible (negative or >50yr), not just
+    # end_date < start_date (which can be a data-entry quirk).
     for c in career_history:
         dur = c.get("duration_months", 0) or 0
         if isinstance(dur, (int, float)):
             if dur < 0 or dur > 600:  # 50 years at one company
                 features.duration_integrity_violation = True
                 break
-        # Also check end_date < start_date
+        # Also check end_date < start_date (only when both are valid dates).
         s = c.get("start_date", "")
         e = c.get("end_date", "") or ""
         if s and e:
@@ -613,27 +614,42 @@ def _detect_honeypot_signals(
 
     # ----- 6. Job title vs responsibility consistency -----
     # If the current title claims AI/ML but no AI/ML keywords in any job desc.
+    # Stricter: only flag when title is *strongly* AI (e.g., "AI Engineer",
+    # "ML Engineer") AND zero AI keywords across ALL job descriptions.
+    # We exclude data-science-only roles (e.g., "Data Scientist" is borderline).
     if has_ai_title and career_history:
-        ai_resp_count = 0
-        for c in career_history:
-            desc = (c.get("description") or "").lower()
-            for kw in config.CAREER_AI_KEYWORDS:
-                if kw in desc:
-                    ai_resp_count += 1
-                    break
-        if ai_resp_count == 0:
-            features.title_responsibility_mismatch = True
+        # Require a strong AI/ML title (not just "Data Scientist")
+        strong_ai_titles = ["ai engineer", "ml engineer", "machine learning engineer",
+                            "deep learning engineer", "ai/ml engineer"]
+        is_strong_ai_title = any(t in title_lc for t in strong_ai_titles)
+        if is_strong_ai_title:
+            ai_resp_count = 0
+            for c in career_history:
+                desc = (c.get("description") or "").lower()
+                for kw in config.CAREER_AI_KEYWORDS:
+                    if kw in desc:
+                        ai_resp_count += 1
+                        break
+            if ai_resp_count == 0:
+                features.title_responsibility_mismatch = True
 
     # ----- 7. Skill-experience consistency (advanced+ with 0 months) -----
+    # Stricter: 5+ skills (was 3) with advanced+ and near-zero duration AND
+    # zero endorsements (a real expert would have endorsements).
     adv_no_dur = 0
     for s in skills:
         if not isinstance(s, dict):
             continue
         prof = (s.get("proficiency") or "").lower()
         dur = s.get("duration_months", 0) or 0
-        if prof in ("advanced", "expert") and (not isinstance(dur, (int, float)) or dur < config.HONEYPOT_ADV_NO_DURATION_MONTHS):
+        endorsements = s.get("endorsements", 0) or 0
+        if (
+            prof in ("advanced", "expert")
+            and (not isinstance(dur, (int, float)) or dur < 3)
+            and (not isinstance(endorsements, (int, float)) or endorsements == 0)
+        ):
             adv_no_dur += 1
-    if adv_no_dur >= 3:  # 3+ advanced+ with near-zero duration = suspicious
+    if adv_no_dur >= config.HONEYPOT_SKILL_EXP_CONTRADICTION_MIN:
         features.skill_experience_contradiction = True
 
     # ----- 8. Education timeline (degree before age 18) -----
@@ -696,7 +712,7 @@ def _detect_honeypot_signals(
             if features.career_progression_anomaly:
                 break
 
-    # ----- 10. Achievement validation (3+ inflation markers, no numbers) -----
+    # ----- 10. Achievement validation (5+ inflation markers, no numbers) -----
     summary = (profile.get("summary") or "").lower()
     all_text = summary
     for c in career_history:
@@ -710,10 +726,8 @@ def _detect_honeypot_signals(
 
     # ----- 11. Technology age (skill before release) -----
     # A skill is "anachronistic" if the candidate could not plausibly have
-    # used it: their career started before the tech was released AND the
-    # skill's duration_months is short enough that it still wouldn't fit.
-    # We allow ±1 year grace and only flag when both the career start and
-    # the skill window are too early.
+    # used it: their career started well before the tech was released.
+    # Stricter: require 3+ years of pre-release, not 1.
     if career_history:
         earliest_year = None
         for c in career_history:
@@ -730,9 +744,6 @@ def _detect_honeypot_signals(
                 if not isinstance(s, dict):
                     continue
                 name = (s.get("name") or "").lower().strip()
-                # Compute the year the skill could first have been used.
-                # If duration_months is given, the skill window starts
-                # max(earliest_year, current_year - ceil(duration/12)).
                 dur_months = s.get("duration_months", 0) or 0
                 if isinstance(dur_months, (int, float)) and dur_months > 0:
                     skill_start_year = current_year - int(dur_months // 12)
@@ -741,14 +752,15 @@ def _detect_honeypot_signals(
                 skill_start_year = max(skill_start_year, earliest_year)
                 for tech, release_year in config.TECH_RELEASE_YEARS.items():
                     if tech in name:
-                        # Flag only if the skill window still starts before release.
-                        if skill_start_year < release_year - 1:
+                        # Flag only if the skill window is clearly before release.
+                        if skill_start_year < release_year - config.HONEYPOT_TECH_AGE_GRACE_YEARS:
                             features.technology_age_anomaly = True
                             break
                 if features.technology_age_anomaly:
                     break
 
-    # ----- 12. Synthetic profile (8+ AI skills, <4 YoE, <3 jobs, high completeness) -----
+    # ----- 12. Synthetic profile (12+ AI skills, <2 YoE, 1 job, 90+ completeness) -----
+    # Stricter thresholds: only the most obviously-fake profiles.
     if (
         features.ai_skill_count >= config.HONEYPOT_SYNTHETIC_PROFILE_MIN_AI_SKILLS
         and yoe < config.HONEYPOT_SYNTHETIC_PROFILE_MAX_YOE

@@ -278,31 +278,47 @@ PRE_LLM_CUTOFF_YEAR = 2020  # Anything started before this in retrieval/ML = pre
 PRE_LLM_BOOST_MAX = 0.30  # capped contribution to pre_llm_signal component
 
 # Timeline validation thresholds
-HONEYPOT_OVERLAP_MAX_JOBS = 3  # >3 concurrent jobs = suspicious
+HONEYPOT_OVERLAP_MAX_JOBS = 5  # >5 concurrent jobs (very conservative)
 HONEYPOT_GAP_MAX_DAYS = 180   # >6-month unexplained gap = suspicious if claim continuous
 
 # Skill-experience contradiction: claims a skill with 0 months usage.
-# Threshold: claim advanced/expert proficiency with duration_months < 3.
-HONEYPOT_ADV_NO_DURATION_MONTHS = 3
+# Threshold: 5+ skills with advanced/expert proficiency AND <3mo duration
+# AND zero endorsements. Stricter than before to avoid FPs.
+HONEYPOT_ADV_NO_DURATION_MIN_SKILLS = 5
 
-# Education timeline: claims degree end_year before age 18 (impossible) or
-# after a career start (suspicious but not always wrong).
+# Education timeline: claims degree end_year before age 18 (impossible).
 HONEYPOT_EDU_AGE_MIN = 18
 
 # Title-responsibility: title claims ML/AI but no ML/AI keywords in any
-# job description across career. Strong honeypot signal.
+# job description across career. Only flag if title is strongly AI AND
+# ZERO AI keywords anywhere in the entire career. Stricter to avoid FPs.
 HONEYPOT_TITLE_RESPONSIBILITY_MATCH_THRESHOLD = 0  # 0 AI keywords = honeypot
 
 # Achievement validation: descriptions with extreme inflation markers
-# (e.g., "10x", "100x improvement", "world-class", "best in class") and
-# no supporting numbers elsewhere = suspicious.
+# (e.g., "10x", "100x improvement", "world-class") with no supporting
+# metrics. Stricter: 5+ inflation keywords (was 3).
 HONEYPOT_ACHIEVEMENT_INFLATION_KEYWORDS = [
     "world-class", "world class", "best in class", "industry-leading",
-    "industry leading", "10x", "100x", "1000x", "10x faster", "10x improvement",
-    "10x more", "revolutionized", "revolutionary", "groundbreaking", "cutting-edge",
+    "industry leading", "10x faster", "10x improvement", "10x more",
+    "revolutionized", "revolutionary", "groundbreaking", "cutting-edge",
     "state-of-the-art", "state of the art", "pioneering", "unprecedented",
 ]
-HONEYPOT_ACHIEVEMENT_INFLATION_MIN = 3  # ≥3 inflation keywords in summary+career = suspicious
+HONEYPOT_ACHIEVEMENT_INFLATION_MIN = 5  # ≥5 inflation keywords (was 3)
+
+# Synthetic profile: tighter. Spec says ~80 honeypots, not 400+.
+# 12+ AI skills, <2 YoE, 1 career entry, 90+ completeness.
+HONEYPOT_SYNTHETIC_PROFILE_MIN_AI_SKILLS = 12
+HONEYPOT_SYNTHETIC_PROFILE_MIN_COMPLETENESS = 90.0
+HONEYPOT_SYNTHETIC_PROFILE_MAX_YOE = 2.0
+HONEYPOT_SYNTHETIC_PROFILE_MAX_HISTORY = 1
+
+# Technology age: stricter. Only flag if skill window is *clearly* before
+# the tech existed (3+ years, not 1).
+HONEYPOT_TECH_AGE_GRACE_YEARS = 3
+
+# Skill experience contradiction: stricter. Need 5+ skills (not 3) and
+# ALL with zero endorsements.
+HONEYPOT_SKILL_EXP_CONTRADICTION_MIN = 5
 
 # Technology age: skill names reference technologies that didn't exist
 # in claimed start years (e.g., claiming PyTorch expertise starting 2015).
@@ -348,13 +364,6 @@ TECH_RELEASE_YEARS = {
     "ollama": 2023,
     "vllm": 2023,
 }
-
-# Synthetic profile detection: nearly-empty profile with high AI skill
-# count is a strong honeypot signal (mass-generated fake profiles).
-HONEYPOT_SYNTHETIC_PROFILE_MIN_AI_SKILLS = 8
-HONEYPOT_SYNTHETIC_PROFILE_MIN_COMPLETENESS = 70.0
-HONEYPOT_SYNTHETIC_PROFILE_MAX_YOE = 4  # <4 YoE with 8+ AI skills is suspicious
-HONEYPOT_SYNTHETIC_PROFILE_MAX_HISTORY = 2  # ≤2 career entries with high skills = suspicious
 
 # Cross-field consistency: certain field combinations are suspicious
 # (e.g., "NLP Researcher" + "consulting-only career" + "no skills in NLP").
