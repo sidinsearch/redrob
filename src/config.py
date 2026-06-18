@@ -250,7 +250,11 @@ TITLE_CHASER_LOOKBACK_YEARS = 8
 
 # Skill inflation check
 SKILL_INFLATION_THRESHOLD = 17  # >17 skills = suspicious
-EXPERT_SKILL_FAKE_THRESHOLD = 5  # "expert" in 5+ skills with 0 duration = honeypot
+# Spec: "expert proficiency in 10 skills with 0 years used". The data has
+# 8 cases at 5+, 13 more at 3-4, none at 6+. Threshold 3 catches the
+# borderline cases (e.g., "HR Manager expert in Webpack with 0 months use")
+# which are clearly impossible profiles.
+EXPERT_SKILL_FAKE_THRESHOLD = 3  # "expert" in 3+ skills with 0 duration = honeypot
 
 # ============================================================================
 # Trap multipliers
