@@ -56,23 +56,40 @@ def detect_template_summary(f: Features) -> bool:
 
 
 def detect_consulting_only(f: Features) -> bool:
-    """Type 3: All employers are consulting/services companies.
-
-    Per the JD: 'People who have only worked at consulting firms (TCS, Infosys,
-    Wipro, Accenture, Cognizant, Capgemini, etc.) in their entire career'.
     """
-    # We computed career_product_ratio = product / total in features.
-    # 0.0 means no product companies, only consulting/unknown.
-    # We flag if there are consulting jobs AND no product history.
-    if f.career_product_ratio == 0.0 and len(f.career_history) > 0:
-        # Check at least one company classified as consulting
-        for c in f.career_history:
-            company = (c.get("company") or "").lower().strip()
-            for consulting in config.CONSULTING_COMPANIES:
-                if consulting in company or company in consulting:
-                    return True
+    Type 3: Candidate has worked ONLY at consulting/services companies.
+
+    JD:
+    - Reject candidates whose entire career consists only of consulting firms
+      (TCS, Infosys, Wipro, Accenture, Cognizant, Capgemini, etc.).
+    - If the candidate has worked at even one product company anywhere in
+      their career, do NOT flag them.
+    """
+
+    # No work history -> cannot determine
+    if not f.career_history:
         return False
-    return False
+
+    # If feature extraction already detected any product company,
+    # the candidate should NOT be flagged.
+    if f.career_product_ratio > 0.0:
+        return False
+
+    # Every employer must be a consulting company.
+    for job in f.career_history:
+        company = (job.get("company") or "").lower().strip()
+
+        is_consulting = any(
+            consulting.lower() in company or company in consulting.lower()
+            for consulting in config.CONSULTING_COMPANIES
+        )
+
+        # Found a company that is not consulting.
+        if not is_consulting:
+            return False
+
+    # All employers are consulting firms.
+    return True
 
 
 def detect_title_chaser(f: Features) -> bool:
@@ -89,26 +106,55 @@ def detect_title_chaser(f: Features) -> bool:
 # Honeypot detection
 # ----------------------------------------------------------------------------
 
+# Spec patterns (must-have, derived from submission_spec.docx):
+#   - career_timeline_anomaly: "8 years of experience at a company founded 3 years ago"
+#   - expert_with_zero_duration: "expert proficiency in 10 skills with 0 years used"
+#   - title_skills_history_mismatch: "AI title with no AI skills or AI history"
+#
+# Additional patterns (3 most relevant from the 10 requested):
+#   - title_responsibility_mismatch: AI/ML title but 0 AI/ML keywords in any
+#     job description across the entire career.
+#   - technology_age_anomaly: claims expertise in a technology that did not
+#     exist when the candidate's career started.
+#   - cross_field_inconsistency: title claims NLP/IR/CV but 0 of those in
+#     skills or career (e.g., "NLP Engineer" with no NLP anywhere).
+#
+# Other detectors (employment_overlap, duration_integrity, skill_experience,
+# education_timeline, career_progression, achievement_inflation,
+# synthetic_profile, nlp_claim_without_evidence) are present as safety nets
+# with strict thresholds. They are dormant on this dataset but ready to fire
+# on truly impossible profiles.
+
+
 def is_honeypot(f: Features) -> bool:
     """Return True if candidate is a forced-zero honeypot.
 
-    We check 13 patterns. Any single positive flag forces the candidate to
+    We check 14 patterns. Any single positive flag forces the candidate to
     the bottom of the ranking. Reasons are reported in honeypot_reasons.
+
+    ponytail: 14 flags is more than we strictly need. The 3 spec patterns
+    are the contract; the 3 most relevant from the user's list
+    (title_responsibility, technology_age, cross_field) are the practical
+    additions. The other 8 are dormant safety nets.
     """
     return any([
+        # Spec patterns (3)
         f.career_timeline_anomaly,
         f.expert_with_zero_duration,
         f.title_skills_history_mismatch,
+        # 3 most relevant from the 10 user-requested detectors
+        f.title_responsibility_mismatch,
+        f.technology_age_anomaly,
+        f.cross_field_inconsistency,
+        # Dormant safety nets (8) — strict thresholds, ready to fire on
+        # truly impossible profiles if any exist in the data
         f.employment_overlap_anomaly,
         f.duration_integrity_violation,
-        f.title_responsibility_mismatch,
         f.skill_experience_contradiction,
         f.education_timeline_anomaly,
         f.career_progression_anomaly,
         f.achievement_inflation,
-        f.technology_age_anomaly,
         f.synthetic_profile,
-        f.cross_field_inconsistency,
         f.nlp_claim_without_evidence,
     ])
 

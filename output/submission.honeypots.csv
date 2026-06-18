@@ -19,15 +19,15 @@ CAND_0038368,ML Engineer,PhonePe,5.4,"Hyderabad, Telangana",India,AI/ML title bu
 CAND_0038431,Mobile Developer,Razorpay,15.0,"Mumbai, Maharashtra",India,career timeline impossible (YoE > career span),1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,1
 CAND_0039754,Senior Applied Scientist,Meta,16.2,"Indore, Madhya Pradesh",India,career timeline impossible (YoE > career span),1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,16,1,3
 CAND_0042100,Machine Learning Engineer,Freshworks,7.3,Singapore,Singapore,skill expertise predates the technology's release,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,10,1,2
-CAND_0046649,Business Analyst,Wipro,3.8,"Coimbatore, Tamil Nadu",India,expert in 5+ skills with 0 months use | canned AI-curious summary | consulting-only career,3,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2
+CAND_0046649,Business Analyst,Wipro,3.8,"Coimbatore, Tamil Nadu",India,expert in 5+ skills with 0 months use | canned AI-curious summary,2,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2
 CAND_0049163,ML Engineer,Aganitha,3.8,"Indore, Madhya Pradesh",India,AI/ML title but 0 AI/ML keywords in any job description,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,8,0,1
 CAND_0050454,AI Engineer,Rephrase.ai,6.8,"Delhi, Delhi",India,skill expertise predates the technology's release,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,14,1,3
 CAND_0052478,Marketing Manager,Dunder Mifflin,12.4,"Coimbatore, Tamil Nadu",India,career timeline impossible (YoE > career span) | canned AI-curious summary,2,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1
 CAND_0053076,ML Engineer,Infosys,4.8,"Kochi, Kerala",India,AI/ML title but 0 AI/ML keywords in any job description | consulting-only career,2,0,0,0,0,0,1,0,0,0,0,0,0,0,0,10,0,1
 CAND_0054319,Junior ML Engineer,CRED,4.1,"Chennai, Tamil Nadu",India,AI/ML title but 0 AI/ML keywords in any job description,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,11,0,1
-CAND_0055792,.NET Developer,Hooli,9.8,"Vizag, Andhra Pradesh",India,skill expertise predates the technology's release | consulting-only career,2,0,0,0,0,0,0,0,0,0,0,1,0,0,0,4,1,4
+CAND_0055792,.NET Developer,Hooli,9.8,"Vizag, Andhra Pradesh",India,skill expertise predates the technology's release,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,4,1,4
 CAND_0055992,AI Engineer,CRED,16.9,Sydney,Australia,career timeline impossible (YoE > career span),1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,11,1,4
-CAND_0056983,Accountant,Pied Piper,12.3,"Ahmedabad, Gujarat",India,expert in 5+ skills with 0 months use | canned AI-curious summary | consulting-only career,3,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,6
+CAND_0056983,Accountant,Pied Piper,12.3,"Ahmedabad, Gujarat",India,expert in 5+ skills with 0 months use | canned AI-curious summary,2,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,6
 CAND_0060642,Frontend Engineer,Cognizant,3.0,Sydney,Australia,expert in 5+ skills with 0 months use | consulting-only career,2,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1
 CAND_0061722,Software Engineer,Wipro,6.8,London,UK,expert in 5+ skills with 0 months use | consulting-only career,2,0,1,0,0,0,0,0,0,0,0,0,0,0,0,5,1,2
 CAND_0063888,.NET Developer,Hooli,2.4,"Mumbai, Maharashtra",India,expert in 5+ skills with 0 months use,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1
@@ -46,7 +46,7 @@ CAND_0091068,HR Manager,TCS,12.7,"Gurgaon, Haryana",India,career timeline imposs
 CAND_0091534,AI Engineer,Flipkart,16.6,"Gurgaon, Haryana",India,career timeline impossible (YoE > career span),1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,8,1,3
 CAND_0091909,Machine Learning Engineer,Rephrase.ai,6.9,"Bangalore, Karnataka",India,skill expertise predates the technology's release,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,13,1,2
 CAND_0093193,Senior Machine Learning Engineer,Niramai,7.9,"Bangalore, Karnataka",India,AI/ML title but 0 AI/ML keywords in any job description,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,8,0,2
-CAND_0093331,NLP Engineer,Genpact AI,16.1,"Kochi, Kerala",India,career timeline impossible (YoE > career span) | consulting-only career,2,1,0,0,0,0,0,0,0,0,0,0,0,0,0,10,1,3
+CAND_0093331,NLP Engineer,Genpact AI,16.1,"Kochi, Kerala",India,career timeline impossible (YoE > career span),1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,10,1,3
 CAND_0095619,NLP Engineer,Nykaa,15.6,"Mumbai, Maharashtra",India,career timeline impossible (YoE > career span),1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,13,0,1
 CAND_0096150,Accountant,Wipro,14.7,"Chennai, Tamil Nadu",India,career timeline impossible (YoE > career span) | canned AI-curious summary | consulting-only career,3,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1
 CAND_0099443,Junior ML Engineer,InMobi,6.0,"Trivandrum, Kerala",India,AI/ML title but 0 AI/ML keywords in any job description,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,5,0,3
