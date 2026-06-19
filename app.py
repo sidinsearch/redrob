@@ -210,12 +210,16 @@ def load_sample_data() -> List[dict]:
 
 def parse_uploaded_file(uploaded_file) -> List[dict]:
     """Parse uploaded JSONL or JSON array file. Cached so re-renders don't re-parse."""
-    return _parse_uploaded_file_cached(uploaded_file.id, uploaded_file.getvalue())
+    # Use the file's name as cache-key hint, plus the actual content.
+    # Streamlit's UploadedFile exposes .name and .getvalue() (not .id).
+    name = getattr(uploaded_file, "name", "uploaded.jsonl")
+    content = uploaded_file.getvalue()
+    return _parse_uploaded_file_cached(name, content)
 
 
 @st.cache_data(show_spinner=False)
-def _parse_uploaded_file_cached(_file_id: str, content: bytes) -> List[dict]:
-    """Internal cached parser. The file_id is a cache-key hint; content is the bytes."""
+def _parse_uploaded_file_cached(_file_name: str, content: bytes) -> List[dict]:
+    """Internal cached parser. _file_name is a cache-key hint; content is the bytes."""
     if isinstance(content, bytes):
         content = content.decode("utf-8")
 
@@ -476,9 +480,9 @@ def main():
     st.divider()
 
     # Build a stable cache key from the data source + weights + top_k.
-    # session_state is keyed by the upload file id (or 'sample' for sample data).
+    # session_state is keyed by the upload file name (or 'sample' for sample data).
     if data_source == "Upload JSONL file" and uploaded is not None:
-        cache_source_key = uploaded.file_id if hasattr(uploaded, "file_id") else "uploaded"
+        cache_source_key = getattr(uploaded, "name", "uploaded")
     else:
         cache_source_key = "sample"
     cache_key = (cache_source_key, tuple(sorted(weights.items())), top_k)
