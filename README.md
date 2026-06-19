@@ -40,13 +40,18 @@ browser opens, done.
 
 ## Docker deploy
 
-A single image handles every mode: CLI ranking or Streamlit sandbox. Build
-once, then pick your command on `docker run`.
+A single image handles every mode: CLI ranking or Streamlit sandbox. Rebuild
+whenever you `git pull` new code, then pick your command on `docker run`.
 
 ```bash
-# Build the image (one time)
+# (Re)build the image — this picks up the latest code from the working tree
 docker build -t redrob-ranker .
 ```
+
+> **Always rebuild after `git pull`.** The image is a snapshot of the source
+> at build time; `git pull` does not update a running or already-built
+> image. If you skip this step, the container will keep running the old
+> code (e.g., the top-100 will be in JSONL order, not ranked order).
 
 **Streamlit sandbox (default — opens in browser on http://localhost:8501):**
 
