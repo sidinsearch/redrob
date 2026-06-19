@@ -34,7 +34,7 @@ import plotly.graph_objects as go
 
 import config
 from features import extract_features
-from scoring import compute_score
+from scoring import compute_final_score
 from trap_detector import analyze
 from reasoning import generate_reasoning
 
@@ -307,7 +307,7 @@ def rank_with_weights(
                        t.is_consulting_only, t.is_title_chaser]):
                 trap_stats["total_clean"] += 1
 
-            score = compute_score(f, t)
+            score = compute_final_score(cand)["final_score"]
             scored.append((score, cand.get("candidate_id", ""), cand, f, t))
 
         # Sort and take top-K
