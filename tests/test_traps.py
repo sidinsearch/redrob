@@ -279,23 +279,51 @@ def test_honeypot_title_skills_mismatch_fires():
 # ----------------------------------------------------------------------------
 
 def test_clean_beats_trap():
-    clean = make_candidate()
+    """A clean candidate with real production evidence should beat a trap
+    candidate with only LLM buzzwords in skills.
+
+    In the new model, the trap is detected by:
+    1. The trap_detector (keyword_stuffer=True)
+    2. The must-haves detector (0/4 because no career_history evidence)
+    The clean candidate has fit_score > 0 (real evidence), the trap
+    candidate has fit_score = 0 (no evidence). So the trap should score
+    lower regardless of availability.
+    """
+    clean = make_candidate(
+        profile={"current_title": "ML Engineer", "current_company": "BigCo",
+                 "years_of_experience": 6.0, "location": "Bangalore", "country": "India"},
+        career_history=[{
+            "company": "BigCo", "title": "ML Engineer",
+            "start_date": "2020-01-01", "duration_months": 60,
+            "description": "Built retrieval system in production. Designed NDCG eval. Python.",
+        }],
+        redrob_signals={
+            "open_to_work_flag": True, "notice_period_days": 30,
+            "recruiter_response_rate": 0.85, "last_active_date": "2026-05-15",
+        },
+    )
     trap = make_candidate(
         profile={"current_title": "Marketing Manager", "current_company": "Coca-Cola", "current_industry": "FMCG"},
+        career_history=[{
+            "company": "Coca-Cola", "title": "Marketing Manager",
+            "start_date": "2020-01-01", "duration_months": 60,
+            "description": "Ran marketing campaigns. Did some hobby coding.",
+        }],
         skills=[
             {"name": "RAG", "proficiency": "advanced", "endorsements": 5, "duration_months": 6},
             {"name": "LangChain", "proficiency": "intermediate", "endorsements": 3, "duration_months": 6},
             {"name": "Embeddings", "proficiency": "intermediate", "endorsements": 2, "duration_months": 6},
+            {"name": "OpenAI", "proficiency": "intermediate", "endorsements": 2, "duration_months": 6},
+            {"name": "Prompt Engineering", "proficiency": "intermediate", "endorsements": 2, "duration_months": 6},
         ],
     )
-    f_clean = extract_features(clean)
     f_trap = extract_features(trap)
-    t_clean = analyze(f_clean)
     t_trap = analyze(f_trap)
+    assert t_trap.is_keyword_stuffer, "Trap should be flagged as keyword_stuffer"
 
-    from scoring import compute_score
-    s_clean = compute_score(f_clean, t_clean)
-    s_trap = compute_score(f_trap, t_trap)
+    from scoring import compute_final_score
+    s_clean = compute_final_score(clean)["final_score"]
+    s_trap = compute_final_score(trap)["final_score"]
     assert s_clean > s_trap, f"clean ({s_clean:.4f}) should beat trap ({s_trap:.4f})"
 
 

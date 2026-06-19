@@ -696,166 +696,151 @@ def main():
 
     with tab3:
         st.markdown("### 📊 Score Component Breakdown (Fit × Availability)")
-
         st.caption(
-            "Final score = **fit_score** × **availability_multiplier** × trap_multiplier. "
-            "Availability is a multiplicative filter per JD: 'a perfect-on-paper candidate "
-            "who hasn't logged in for 6 months is not actually available.'"
+            "Per audit spec: **fit_score (0-100) is gated on the four must-haves**; "
+            "**availability (0.1-1.0) is an additive score**. "
+            "final_score = (fit / 100) × availability. "
+            "fit_score is the dominant signal — a candidate with must_haves ≤ 1 "
+            "should never appear in the top 30, even at availability = 1.0."
         )
 
         # Select candidate for breakdown
         selected_id = st.selectbox(
             "Select candidate",
             [r["candidate_id"] for r in rows],
-            format_func=lambda x: f"Rank {next(r['rank'] for r in rows if r['candidate_id'] == x)}: {x}"
+            format_func=lambda x: f"Rank {next(r['rank'] for r in rows if r['candidate_id'] == x)}: {x}",
+            key="score_breakdown_select",
         )
 
         if selected_id:
-            row = next(r for r in rows if r["candidate_id"] == selected_id)
-            f = row["features"]
-
-            # Compute the new fit + availability components (matching scoring.py)
-            from scoring import (
-                _career_history_relevance, _project_impact, _skills_score,
-                _company_quality_score, compute_relevance, compute_availability,
+            # Find the candidate's raw record (offset_to_record) so we can
+            # recompute scores from scratch — the new model works on
+            # candidate dict, not Features.
+            offset = next(
+                (o for c, s, o in
+                 ((rr["candidate_id"], rr["score"], rr["features"].candidate_id if hasattr(rr["features"], "candidate_id") else None)
+                  for rr in rows)
+                 if c == selected_id), None
             )
-            from trap_detector import TrapInfo
-            trap = row["traps"]
-            trap_stub = type("T", (), {
-                "is_consulting_only": trap.is_consulting_only,
-                "is_keyword_stuffer": False,
-                "is_template_summary": False,
-                "is_title_chaser": False,
-            })()
+            # Get the actual record from the session state. We cached
+            # rank_candidates which is the original list.
+            if "rank_candidates" in st.session_state:
+                cand_record = next(
+                    (c for c in st.session_state.rank_candidates
+                     if c.get("candidate_id") == selected_id), None
+                )
+            else:
+                cand_record = None
 
-            chr_score = _career_history_relevance(f)
-            pi_score = _project_impact(f)
-            sk_score = _skills_score(f)
-            cq_score = _company_quality_score(f, trap_stub)
-            ed_score = f.education_score
-            fit_score = compute_relevance(f)
-            avail_score = compute_availability(f)
+            if cand_record is None:
+                st.warning("Could not load full candidate record (try re-ranking)")
+            else:
+                from scoring import compute_final_score
+                from must_haves import detect_must_haves, apply_hard_disqualifiers
+                scores = compute_final_score(cand_record)
+                fit = scores["fit_score"]
+                n_met = scores["must_haves_met"]
+                avail = scores["availability"]
+                final = scores["final_score"]
+                evidence = scores["evidence"]
 
-            # ---- Fit components (additive, weights rebalanced) ----
-            w = weights
-            fit_components = {
-                "Career history relevance (45%)": chr_score * w.get("career_history_relevance", 0.45),
-                "Project impact (25%)": pi_score * w.get("project_impact", 0.25),
-                "Skills (20%)": sk_score * w.get("skills", 0.20),
-                "Company quality (5%)": cq_score * w.get("company_quality", 0.05),
-                "Education (5%)": ed_score * w.get("education", 0.05),
-            }
+                # ---- Hard disqualifier banner ----
+                if "disqualified" in evidence:
+                    st.error(f"**Hard disqualifier:** {evidence['disqualified']}")
+                    st.markdown(f"`fit_score = 0.0` (regardless of any other signal)")
 
-            col1, col2 = st.columns(2)
+                # ---- Must-have evidence (the core of fit_score) ----
+                st.markdown("#### JD Must-haves (gates fit_score)")
+                st.caption(
+                    "Each must-have requires evidence in **career_history.description** "
+                    "— NOT the skills list. Skill-list keywords without a job "
+                    "description that demonstrates the work do NOT satisfy."
+                )
+                mh_names = {
+                    "embeddings_retrieval": "1. Production embeddings-based retrieval",
+                    "vector_db": "2. Production vector DB / hybrid search",
+                    "ranking_eval": "3. Eval framework design for ranking",
+                    "strong_python": "4. Strong Python in a real system",
+                }
+                for mh_key, mh_label in mh_names.items():
+                    mh_info = evidence.get(mh_key, {})
+                    met = mh_info.get("met", False)
+                    icon = "✅" if met else "❌"
+                    color = "green" if met else "red"
+                    with st.expander(f"{icon} {mh_label}", expanded=False):
+                        if met:
+                            st.markdown(f"**Status:** :green[Met]")
+                            n_primary = mh_info.get("n_primary", 0)
+                            n_context = mh_info.get("n_context", 0)
+                            st.markdown(f"**Evidence strength:** {n_primary} primary hit(s), {n_context} context hit(s)")
+                            for sent in mh_info.get("evidence_sentences", [])[:2]:
+                                st.markdown(f"> {sent[:250]}")
+                        else:
+                            st.markdown(f"**Status:** :red[NOT met]")
+                            disq = mh_info.get("disqualifying_sentences", [])
+                            if disq:
+                                st.markdown(f"**Disqualifying sentence:**")
+                                st.markdown(f"> {disq[0][:250]}")
+                            else:
+                                st.markdown("**No specific evidence found in career_history.**")
 
-            with col1:
-                st.markdown("#### Fit Component Contributions")
-                fig = go.Figure(data=[
-                    go.Bar(
-                        x=list(fit_components.keys()),
-                        y=list(fit_components.values()),
-                        marker_color=px.colors.qualitative.Pastel,
-                    )
+                # ---- Score summary ----
+                st.markdown("---")
+                st.markdown("#### Final score breakdown")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Must-haves met", f"{n_met} / 4")
+                with col2:
+                    st.metric("Fit score (0-100)", f"{fit:.1f}")
+                with col3:
+                    st.metric("Availability (0.1-1.0)", f"{avail:.3f}")
+                with col4:
+                    st.metric("Final score (0-1)", f"{final:.3f}")
+
+                st.markdown(f"**Final = (fit / 100) × availability = ({fit:.1f} / 100) × {avail:.3f} = {final:.3f}**")
+
+                # ---- Availability breakdown (additive) ----
+                st.markdown("#### Availability components (additive, clipped to [0.1, 1.0])")
+                rs = cand_record.get("redrob_signals", {}) or {}
+                # Recompute each component
+                open_score = 1.0 if rs.get("open_to_work_flag") else 0.25
+                notice = rs.get("notice_period_days", 0) or 0
+                if notice <= 30:
+                    notice_score = 1.0
+                elif notice <= 120:
+                    notice_score = 1.0 - (notice - 30) / 90 * 0.8
+                else:
+                    notice_score = 0.2
+                resp_score = max(0.0, min(1.0, rs.get("recruiter_response_rate", 0) or 0))
+                last_active = rs.get("last_active_date", "")
+                recency_score = 0.0
+                if last_active:
+                    try:
+                        from datetime import date
+                        d = date.fromisoformat(last_active)
+                        days = (date.today() - d).days
+                        if days <= 30:
+                            recency_score = 1.0
+                        elif days <= 180:
+                            recency_score = 1.0 - (days - 30) / 150
+                    except (ValueError, TypeError):
+                        recency_score = 0.0
+
+                av_data = pd.DataFrame([
+                    {"Component": "open_to_work_flag", "Raw": f"{open_score:.2f}",
+                     "Weight": "0.40", "Contribution": f"{0.40 * open_score:.3f}",
+                     "Status": "✅" if rs.get("open_to_work_flag") else "❌"},
+                    {"Component": "notice_period", "Raw": f"{notice_score:.2f}",
+                     "Weight": "0.25", "Contribution": f"{0.25 * notice_score:.3f}",
+                     "Status": f"{notice}d"},
+                    {"Component": "recruiter_response_rate", "Raw": f"{resp_score:.2f}",
+                     "Weight": "0.20", "Contribution": f"{0.20 * resp_score:.3f}",
+                     "Status": f"{rs.get('recruiter_response_rate', 0):.0%}"},
+                    {"Component": "recency", "Raw": f"{recency_score:.2f}",
+                     "Weight": "0.15", "Contribution": f"{0.15 * recency_score:.3f}",
+                     "Status": last_active or "never"},
                 ])
-                fig.update_layout(
-                    xaxis_tickangle=-45,
-                    yaxis_title="Fit Score Contribution",
-                    showlegend=False,
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
-            with col2:
-                st.markdown("#### Fit Distribution")
-                fig = px.pie(
-                    values=list(fit_components.values()),
-                    names=list(fit_components.keys()),
-                    color_discrete_sequence=px.colors.qualitative.Pastel,
-                    hole=0.3,
-                )
-                fig.update_traces(textposition='inside', textinfo='percent+label')
-                fig.update_layout(showlegend=False)
-                st.plotly_chart(fig, use_container_width=True)
-
-            # ---- Availability breakdown (multiplicative) ----
-            st.markdown("#### Availability Multiplier Breakdown")
-            st.caption(
-                "All four signals MULTIPLIED together — multiple weak signals compound. "
-                "A perfect-on-paper candidate with 0% response × 4-month inactive drops to "
-                "~0.13 of fit score, not just 10% lower."
-            )
-
-            # Compute each multiplier for display
-            open_mult = 1.0 if f.open_to_work else 0.5
-            notice = f.notice_period_days
-            if notice <= 0:
-                notice_mult = 1.0
-            elif notice <= 30:
-                notice_mult = 1.0
-            elif notice <= 60:
-                notice_mult = 0.85
-            elif notice <= 90:
-                notice_mult = 0.65
-            elif notice <= 120:
-                notice_mult = 0.45
-            else:
-                notice_mult = 0.30
-            resp_mult = 0.5 + 0.5 * max(0.0, min(1.0, f.recruiter_response_rate))
-            days = f.days_since_active
-            if days <= 30:
-                active_mult = 1.0
-            elif days <= 90:
-                active_mult = 0.90
-            elif days <= 180:
-                active_mult = 0.65
-            elif days <= 365:
-                active_mult = 0.40
-            elif days == 999:
-                active_mult = 0.30
-            else:
-                active_mult = 0.20
-
-            av_col1, av_col2, av_col3, av_col4 = st.columns(4)
-            with av_col1:
-                st.metric("Open to work", f"{'✅' if f.open_to_work else '❌'}", f"{open_mult:.2f}x")
-                st.caption(f"Notice: {notice}d → {notice_mult:.2f}x")
-            with av_col2:
-                st.metric("Recruiter response", f"{f.recruiter_response_rate:.0%}", f"{resp_mult:.2f}x")
-                st.caption(f"Active: {days}d ago → {active_mult:.2f}x")
-            with av_col3:
-                st.metric("Fit score", f"{fit_score:.3f}")
-                st.caption("(additive)")
-            with av_col4:
-                st.metric("Availability", f"{avail_score:.3f}")
-                st.caption("(multiplicative)")
-
-            st.markdown(f"**Final score = {fit_score:.3f} × {avail_score:.3f} = {fit_score * avail_score:.3f}**")
-
-            # ---- Evidence flags (Rule 6) ----
-            st.markdown("#### Project Impact Evidence (Rule 6)")
-            ev_col1, ev_col2, ev_col3 = st.columns(3)
-            with ev_col1:
-                st.markdown(f"**Ranking evidence:** {'✅' if f.has_ranking_evidence else '❌'}")
-                st.markdown(f"**Retrieval evidence:** {'✅' if f.has_retrieval_evidence else '❌'}")
-            with ev_col2:
-                st.markdown(f"**Eval evidence:** {'✅' if f.has_eval_evidence else '❌'}")
-                st.markdown(f"**A/B test evidence:** {'✅' if f.has_ab_test_evidence else '❌'}")
-            with ev_col3:
-                st.markdown(f"**Production evidence:** {'✅' if f.has_production_evidence else '❌'}")
-                st.markdown(f"**High-value roles:** {f.high_value_role_count}")
-
-            # ---- Raw scores table ----
-            st.markdown("#### Raw Component Scores")
-            raw_df = pd.DataFrame([
-                {"Component": k, "Raw Score (0-1)": f"{v:.3f}", "Fit Weight": f"{w.get(key, 0):.2f}"}
-                for k, v, key in [
-                    ("Career history relevance", chr_score, "career_history_relevance"),
-                    ("Project impact (evidence)", pi_score, "project_impact"),
-                    ("Skills", sk_score, "skills"),
-                    ("Company quality", cq_score, "company_quality"),
-                    ("Education", ed_score, "education"),
-                ]
-            ])
-            st.dataframe(raw_df, width="stretch", hide_index=True)
+                st.dataframe(av_data, use_container_width=True, hide_index=True)
 
 
     # ----------------------------------------------------------------------------

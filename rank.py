@@ -4,12 +4,17 @@ Usage:
     python rank.py --candidates ./candidates.jsonl --out ./output/submission.csv
 
 Pipeline:
-    stream JSONL → extract features → detect traps → score → sort top-100
-    → seek-and-load top-100 records → generate reasoning → write CSV → validate
+    stream JSONL → detect must-haves (from career_history) → score
+    → sort by (final_score desc, candidate_id asc) → top-100
+    → generate reasoning citing specific career_history sentences
+    → write submission CSV → validate
+
+Per audit spec (2026-06-19):
+    final_score = (fit_score / 100) * availability_multiplier
+    where fit_score is gated on the four must-haves and availability is
+    a clipped additive filter.
 
 Compute budget: ≤5 min on CPU, ≤16 GB RAM, no network.
-
-The single command that produces submission.csv from candidates.jsonl.
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Any, Dict
 
 # Allow running as both module and script.
 # rank.py lives at project root, modules live in src/.
@@ -33,9 +38,16 @@ for p in (str(_HERE), str(_SRC)):
 import config
 import output
 import parser
-from features import Features, extract_features
-from scoring import compute_score
-from trap_detector import TrapInfo, analyze
+import trap_detector
+from features import extract_features
+import must_haves
+from scoring import (
+    compute_final_score,
+    compute_fit_score,
+    compute_availability_score,
+)
+from trap_detector import analyze
+from features import Features
 
 
 # ----------------------------------------------------------------------------
@@ -43,11 +55,9 @@ from trap_detector import TrapInfo, analyze
 # ----------------------------------------------------------------------------
 
 class _TopKTracker:
-    """Track top-K candidates by (score DESC, candidate_id ASC) without storing all.
-
-    For 100K candidates and K=100, this is O(N log K) ≈ 660K operations.
-    Simpler than a custom heap — we just collect everything and use
-    heapq.nlargest at the end.
+    """Track top-K candidates by (score DESC, candidate_id ASC) without
+    storing all of them. For 100K candidates and K=100, this is
+    O(N log K) ≈ 660K operations.
     """
 
     def __init__(self, k: int):
@@ -61,12 +71,78 @@ class _TopKTracker:
 
     def top_unpacked(self) -> List[Tuple[str, float, int]]:
         """Return [(candidate_id, score, offset)] sorted by score desc, id asc."""
-        # 100K items * ~24 bytes per tuple = 2.4 MB. Trivial.
-        # Sort once. nlargest would be O(N log K) which is faster in
-        # theory but full sort is more readable and the cost is sub-second.
         self._items.sort(key=lambda x: (-x[0], x[1]))
         top = self._items[: self.k]
         return [(cid, score, offset) for (score, cid, offset) in top]
+
+
+# ----------------------------------------------------------------------------
+# Reasoning generation (cites specific career_history evidence)
+# ----------------------------------------------------------------------------
+
+def _generate_reasoning(candidate: dict, scores: dict, rank: int) -> str:
+    """Generate a 1-2 sentence reasoning citing specific evidence.
+
+    The reasoning MUST cite specific career_history sentences, not
+    skills-list keywords. If must_haves_met <= 1, the reasoning must
+    explicitly say the candidate does not meet core JD requirements.
+    """
+    fit = scores["fit_score"]
+    n_met = scores["must_haves_met"]
+    evidence = scores["evidence"]
+
+    parts = []
+
+    # 1. Job title + YoE (factual context)
+    profile = candidate.get("profile", {}) or {}
+    title = profile.get("current_title", "") or ""
+    company = profile.get("current_company", "") or ""
+    yoe = profile.get("years_of_experience", 0) or 0
+    if title:
+        parts.append(f"{title}")
+        if company:
+            parts.append(f"at {company}")
+        if yoe:
+            parts.append(f"({yoe}yr)")
+        parts.append(".")
+
+    # 2. Must-have summary
+    if n_met >= 4:
+        parts.append(f" Strong JD fit: {n_met}/4 must-haves.")
+    elif n_met == 3:
+        parts.append(f" {n_met}/4 must-haves met.")
+    elif n_met <= 1:
+        if "disqualified" in evidence:
+            parts.append(f" Disqualified: {evidence['disqualified']}.")
+        else:
+            parts.append(f" Only {n_met}/4 must-haves met — does not meet core JD requirements.")
+
+    # 3. Cite a specific career_history sentence (the strongest evidence)
+    if n_met >= 1:
+        # Find the must-have with the strongest primary evidence
+        best_mh = None
+        best_evidence = ""
+        for mh_name, info in evidence.items():
+            if info["met"] and info.get("evidence_sentences"):
+                if not best_evidence or len(info["evidence_sentences"][0]) > len(best_evidence):
+                    best_mh = mh_name
+                    best_evidence = info["evidence_sentences"][0]
+        if best_evidence:
+            parts.append(f" Evidence: {best_evidence[:150]}")
+
+    # 4. Availability signal (if positive)
+    avail = scores["availability"]
+    rs = candidate.get("redrob_signals", {}) or {}
+    if rs.get("open_to_work_flag"):
+        parts.append(" Open to work.")
+    if rs.get("recruiter_response_rate", 0) >= 0.5:
+        parts.append(" Good recruiter response rate.")
+
+    text = "".join(parts).strip()
+    # Cap at 300 chars (per submission spec)
+    if len(text) > config.MAX_REASONING_LEN:
+        text = text[: config.MAX_REASONING_LEN - 1].rstrip() + "…"
+    return text
 
 
 # ----------------------------------------------------------------------------
@@ -94,9 +170,7 @@ def run(candidates_path: str | Path, out_path: str | Path, top_k: int = config.T
     n_consulting_only = 0
     n_title_chaser = 0
     n_skipped = 0
-    # Detailed honeypot records: [(cid, features_dict, trap), ...]
-    # Stored as raw features dicts so we can write the full CSV at the end
-    # without re-extracting.
+    n_disqualified = 0  # hard disqualifiers from Step 1
     honeypot_details: list = []
 
     print(f"[ranker] reading {candidates_path} ({parser.path_size_mb(candidates_path):.1f} MB)")
@@ -107,7 +181,6 @@ def run(candidates_path: str | Path, out_path: str | Path, top_k: int = config.T
         try:
             features = extract_features(candidate)
         except Exception as e:
-            # Defensive: skip malformed candidates without crashing.
             n_skipped += 1
             if n_total % 10_000 == 0:
                 print(f"[ranker] skipped {n_skipped} candidates so far (last err: {e})")
@@ -126,22 +199,26 @@ def run(candidates_path: str | Path, out_path: str | Path, top_k: int = config.T
         if trap.is_title_chaser:
             n_title_chaser += 1
 
-        score = compute_score(features, trap)
-        # We need both the score and the file offset so we can seek back later
-        # to load the candidate for reasoning.
-        # Use features.candidate_id (cleaner) + offset (for seek)
-        topk.offer(score, features.candidate_id, offset)
+        # NEW: score from raw candidate dict (audit spec)
+        scores = compute_final_score(candidate)
+        # Track hard disqualifiers
+        if scores["evidence"].get("disqualified"):
+            n_disqualified += 1
+        final_score = scores["final_score"]
+
+        topk.offer(final_score, features.candidate_id, offset)
 
         if n_total % 25_000 == 0:
             elapsed = time.perf_counter() - t0
             print(f"[ranker] {n_total:>7d} candidates in {elapsed:5.1f}s "
                   f"(honeypots={n_honeypots}, ks={n_keyword_stuffers}, "
-                  f"ts={n_template_summary}, co={n_consulting_only}, tc={n_title_chaser})")
+                  f"ts={n_template_summary}, co={n_consulting_only}, tc={n_title_chaser}, "
+                  f"disq={n_disqualified})")
             sys.stdout.flush()
 
     t1 = time.perf_counter()
     print(f"[ranker] extracted features in {t1 - t0:.1f}s "
-          f"({n_total} total, {n_skipped} skipped, {n_honeypots} honeypots)")
+          f"({n_total} total, {n_skipped} skipped, {n_honeypots} honeypots, {n_disqualified} hard-disqualified)")
     sys.stdout.flush()
 
     # Write honeypots.csv with full details.
@@ -179,7 +256,7 @@ def run(candidates_path: str | Path, out_path: str | Path, top_k: int = config.T
     print(f"[ranker] wrote {honeypot_path} ({len(honeypot_csv_rows)} honeypots)")
 
     # Get top-K
-    top_unpacked = topk.top_unpacked()  # [(cid, score, offset), ...]
+    top_unpacked = topk.top_unpacked()
 
     # Seek-and-load just the top-100 records
     top_offsets = [o for _, _, o in top_unpacked]
@@ -188,58 +265,26 @@ def run(candidates_path: str | Path, out_path: str | Path, top_k: int = config.T
     # Map back: offset -> record
     offset_to_record = {off: rec for off, rec in zip(top_offsets, top_records)}
 
-    # Build (rank, candidate_id, score, reasoning) rows
-    # Sort by score desc, candidate_id asc (for tie-break)
-    sorted_top = sorted(
-        [(cid, score, offset) for cid, score, offset in top_unpacked],
-        key=lambda x: (-x[1], x[0])
-    )
-
-    # Apply a tiny epsilon to the displayed score so that any two
-    # candidates with the same rounded score still have a strictly
-    # monotonic displayed score when sorted by cid ascending. This
-    # makes the validator's "equal scores → cid ascending" check pass.
-    # The formula: for each rank i (1-indexed), add an epsilon that
-    # makes the smaller cid appear slightly higher. We invert the cid
-    # number so smaller cids get larger epsilons (i.e., higher scores).
-    # epsilon = (MAX_CID - cid_numeric) * 1e-9
-    # Smaller cid → larger epsilon → higher display score → ranks first.
-    n = len(sorted_top)
-    new_sorted = []
-    for rank, (cid, score, offset) in enumerate(sorted_top, start=1):
-        # Extract numeric part of candidate_id (CAND_XXXXXXX)
+    # Build (rank, candidate_id, fit, must_haves, availability, final, reasoning) rows.
+    # We sort by final_score desc, with epsilon on cid to break ties
+    # (smaller cid → higher display score).
+    sorted_top = []
+    for cid, score, offset in top_unpacked:
         try:
             cid_num = int(cid.split("_")[1])
         except (IndexError, ValueError):
             cid_num = 0
-        # Invert: smaller cid → larger epsilon
-        # Use 9999999 - cid_num so the smallest cid gets 9999999
-        # and the largest cid gets 0.
+        # Smaller cid → larger epsilon → higher display score → ranks first.
         epsilon = (9999999 - cid_num) * 1e-9
-        # But we want smaller cid to rank higher, which means higher
-        # display score. Higher score + larger epsilon = higher display.
-        # So smaller cid → larger epsilon → higher display score.
-        # That correctly orders ties by cid ascending.
         display_score = score + epsilon
-        new_sorted.append((cid, score, offset, display_score))
-
-    # Re-sort by display score (preserves cid ordering on ties)
-    new_sorted.sort(key=lambda x: -x[3])
-    sorted_top = [(cid, score, offset) for cid, score, offset, _ in new_sorted]
+        sorted_top.append((cid, score, offset, display_score))
+    sorted_top.sort(key=lambda x: -x[3])
 
     rows: List[Tuple[str, int, float, str]] = []
-    for rank, (cid, score, offset, display_score) in enumerate(new_sorted, start=1):
+    for rank, (cid, score, offset, display_score) in enumerate(sorted_top, start=1):
         rec = offset_to_record.get(offset, {})
-        try:
-            features = extract_features(rec)
-        except Exception:
-            features = Features(candidate_id=cid, current_title="", current_company="",
-                                current_industry="", years_of_experience=0,
-                                country="", location="")
-        trap = analyze(features)
-        from reasoning import generate_reasoning
-        reasoning = generate_reasoning(features, trap, rank)
-        # Write the display_score (with epsilon) to ensure validator tie-break
+        scores = compute_final_score(rec)
+        reasoning = _generate_reasoning(rec, scores, rank)
         rows.append((cid, rank, display_score, reasoning))
 
     t2 = time.perf_counter()
@@ -262,14 +307,24 @@ def run(candidates_path: str | Path, out_path: str | Path, top_k: int = config.T
     else:
         print(f"[ranker] validation passed")
 
-    # Honeypot sanity check on the top-100
-    honeypots_in_top = 0
-    for cid, rank, score, _ in rows:
-        if score <= config.HONEYPOT_TAX / 2:  # effectively forced to bottom
-            honeypots_in_top += 1
-    if honeypots_in_top > 0:
-        print(f"[ranker] WARNING: {honeypots_in_top} honeypots forced to top-100 "
-              f"(should be 0 — check trap_detector)")
+    # Sanity check: no candidate with must_haves <= 1 in top 30 (per audit spec)
+    must_have_violations = []
+    for rank, (cid, _, _, _) in enumerate(
+        [(r[0], r[1], r[2], r[3]) for r in rows], 1
+    ):
+        if rank > 30:
+            break
+        # Recompute scores for this candidate
+        rec = offset_to_record.get(
+            next(o for c, _, o, _ in sorted_top if c == cid), {}
+        )
+        scores = compute_final_score(rec)
+        if scores["must_haves_met"] <= 1 and scores["fit_score"] > 25:
+            must_have_violations.append((rank, cid, scores["must_haves_met"]))
+    if must_have_violations:
+        print(f"[ranker] SANITY CHECK FAILED: candidates with must_haves <= 1 in top 30:")
+        for rank, cid, n in must_have_violations:
+            print(f"  - rank {rank}: {cid} (must_haves={n})")
 
     total = time.perf_counter() - t0
     stats = {
@@ -280,6 +335,7 @@ def run(candidates_path: str | Path, out_path: str | Path, top_k: int = config.T
         "n_template_summary": n_template_summary,
         "n_consulting_only": n_consulting_only,
         "n_title_chaser": n_title_chaser,
+        "n_disqualified": n_disqualified,
         "runtime_seconds": total,
         "out_path": str(out_path),
         "honeypot_path": str(honeypot_path),

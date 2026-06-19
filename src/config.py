@@ -268,6 +268,221 @@ SKILL_INFLATION_THRESHOLD = 17  # >17 skills = suspicious
 EXPERT_SKILL_FAKE_THRESHOLD = 3  # "expert" in 3+ skills with 0 duration = honeypot
 
 # ============================================================================
+# Must-have evidence patterns (Step 2 of the audit spec)
+# ============================================================================
+# These are the JD's four explicit must-haves. Each one is checked against
+# career_history.description, NOT the skills list. A skill-list keyword
+# with no career_history evidence does NOT satisfy the must-have.
+#
+# We use a 3-tier system per must-have:
+# - primary patterns: strong evidence in a job description
+# - context patterns: supporting evidence (e.g., model names used)
+# - exclusions: phrases that DISQUALIFY the must-have (e.g., "platform team
+#   handled it" — meaning the candidate did NOT do this work personally)
+#
+# ponytail: the exclusion list is critical. CAND_0046132 was ranked #1 in
+# the previous round because the project_impact detector counted
+# "collaborative filtering" as recommendation work, but that's NOT
+# embeddings-based retrieval. Without exclusions, the model is fooled.
+MUST_HAVE_PATTERNS = {
+    # ---------------------------------------------------------------
+    # Must-have 1: Production embeddings-based retrieval
+    # JD: "Production experience with embeddings-based retrieval systems
+    # (sentence-transformers, OpenAI embeddings, BGE, E5, or similar)
+    # deployed to real users. We don't care which model — we care that
+    # you've handled embedding drift, index refresh, retrieval-quality
+    # regression in production."
+    # ---------------------------------------------------------------
+    "embeddings_retrieval": {
+        "primary": [
+            "deployed retrieval", "production retrieval", "retrieval in production",
+            "shipped retrieval", "embedding-based retrieval", "embeddings-based retrieval",
+            "vector search production", "semantic search production",
+            "sentence-transformers", "sentence transformers",
+            "openai embeddings", "bge", "e5", "embedding model",
+            "embedding drift", "index refresh", "retrieval-quality regression",
+            "retrieval quality", "retrieval system", "dense retrieval",
+            "vector database production", "vector db production",
+            "ann index", "approximate nearest neighbor",
+            "vector embeddings", "embedding-based search", "semantic retrieval",
+            "embedding service", "embedding pipeline",
+            "embedding index", "ann search", "vector similarity",
+            "embedding model", "embedding store", "vector store",
+            "production embeddings", "production vector",
+        ],
+        "context": [
+            "retrieval", "embeddings", "vector search", "semantic search",
+            "embedding", "vector index", "ann", "approximate nearest",
+        ],
+        "exclusions": [
+            "platform team handled", "platform team manages",
+            "outsourced deployment", "managed by infra",
+            "not responsible for deployment", "deployment handled by",
+            "collaborative filtering", "matrix factorization",
+            "two-tower",  # could be a real signal but we want stronger evidence
+        ],
+    },
+    # ---------------------------------------------------------------
+    # Must-have 2: Production vector DB / hybrid search
+    # JD: "Production experience with vector databases or hybrid search
+    # infrastructure — Pinecone, Weaviate, Qdrant, Milvus, OpenSearch,
+    # Elasticsearch, FAISS, or something similar."
+    # ---------------------------------------------------------------
+    "vector_db": {
+        "primary": [
+            "pinecone", "weaviate", "qdrant", "milvus", "vespa", "chroma",
+            "faiss", "elasticsearch cluster", "opensearch cluster",
+            "vector index", "vector database", "vector db",
+            "hybrid search", "hybrid retrieval", "bm25 + dense", "dense + sparse",
+            "elasticsearch", "opensearch", "solr", "lucene",
+            "vector store", "ann index", "ann search", "approximate nearest",
+            "vector similarity", "hnsw", "ivf", "pq",
+        ],
+        "context": [
+            "vector", "embedding index",
+        ],
+        "exclusions": [
+            "platform team handled", "managed by infra",
+            "deployment handled by", "not responsible for",
+            "only evaluated", "only tested",
+        ],
+    },
+    # ---------------------------------------------------------------
+    # Must-have 3: Eval framework design for ranking
+    # JD: "Hands-on experience designing evaluation frameworks for ranking
+    # systems — NDCG, MRR, MAP, offline-to-online correlation, A/B test
+    # interpretation."
+    # ---------------------------------------------------------------
+    "ranking_eval": {
+        "primary": [
+            "ranking evaluation", "ranking eval", "search evaluation",
+            "ndcg", "mrr", "map@", "offline-online correlation",
+            "offline to online", "online evaluation framework",
+            "evaluation framework", "evaluation infrastructure",
+            "ab test for ranking", "ab test for search", "ab test for recommendation",
+            "experiment framework", "experimentation platform",
+            "ab test for rec", "a/b testing ranking",
+            "offline evaluation", "online evaluation", "offline/online",
+            "offline-online", "labeling pipeline", "relevance labeling",
+            "human judgments", "click-through data", "click model",
+            "ranking metrics", "relevance metrics",
+            "evaluation pipeline", "evaluation harness",
+        ],
+        "context": [
+            "ab test", "a/b test", "online experiment", "experiment",
+        ],
+        "exclusions": [
+            "forecasting model", "time series model", "classification model",
+            "cv model", "vision model", "speech model", "robotics model",
+            "non-ranking",
+        ],
+    },
+    # ---------------------------------------------------------------
+    # Must-have 4: Strong Python in a real system
+    # JD: "Strong Python. Yes really, we care about code quality."
+    # ---------------------------------------------------------------
+    "strong_python": {
+        "primary": [
+            "fastapi", "django", "flask", "pydantic", "celery",
+            "pytest", "asyncio", "sqlalchemy", "python service",
+            "python microservice", "python backend", "python api",
+            "python pipeline", "python production",
+            "python codebase", "python library",
+            "python framework", "python code", "wrote python",
+        ],
+        "context": [
+            "python", "py", "pytest",
+        ],
+        "exclusions": [
+            "no python", "minimal python", "python only for scripts",
+        ],
+    },
+}
+
+# Nice-to-haves: add up to +10 total to fit_score, never enough alone to
+# overcome a low must-have baseline. Detected in career_history too.
+NICE_TO_HAVE_PATTERNS = {
+    "llm_finetuning": [
+        "lora", "qlora", "peft", "fine-tuning", "fine tuning", "fine-tuned",
+        "instruction tuning", "rlhf", "dpo",
+    ],
+    "learning_to_rank": [
+        "learning to rank", "learning-to-rank", "l2r", "lambdamart", "ranknet",
+        "rankboost", "listwise", "pairwise",
+    ],
+    "hr_tech_marketplace": [
+        "hr-tech", "hr tech", "recruiting tech", "marketplace",
+        "candidate matching", "job matching", "talent marketplace",
+    ],
+    "distributed_systems": [
+        "distributed system", "kafka", "spark", "ray", "triton",
+        "large-scale inference", "distributed inference",
+    ],
+    "open_source": [
+        "open source", "open-source", "github", "maintainer", "contributor",
+    ],
+}
+
+# Negative patterns: subtract from baseline.
+NEGATIVE_PATTERNS = {
+    "platform_team_handled": [
+        "platform team handled", "platform team manages",
+        "outsourced deployment", "deployment handled by",
+        "managed by infra", "infra team handled",
+    ],
+    "title_chasing": [
+        "title chase", "title optimization", "rapid promotion",
+    ],
+    "closed_source_only": [
+        "closed source", "closed-source", "proprietary", "internal tool only",
+    ],
+    "explicit_gap_admission": [
+        "still building depth on", "production handled by the platform",
+        "looking to step up", "transitioning into", "no production",
+        "no deployment experience",
+    ],
+}
+
+# Hard disqualifiers (Step 1) — fit_score = 0 if any of these fire.
+DISQUALIFIER_PATTERNS = {
+    "research_only_no_production": [
+        # Career in pure research: postdoc, research scientist, lab. No
+        # production deployment evidence anywhere.
+    ],  # checked structurally, not by keyword
+    "consulting_only": [
+        # List at config.CONSULTING_COMPANIES — checked structurally
+    ],
+    "cv_speech_robotics_primary": [
+        # Career in CV, speech, robotics with no NLP/IR/retrieval work
+    ],  # checked structurally
+    "langchain_only_under_12mo": [
+        # AI experience < 12mo, mostly LangChain → OpenAI
+    ],  # checked structurally
+    "no_production_code_18mo": [
+        # Senior engineer, no production code in last 18 months
+    ],  # checked structurally
+}
+
+# Availability multiplier weights (Step 3 of audit spec).
+# This is an additive score, clipped to [0.1, 1.0].
+AVAILABILITY_WEIGHTS = {
+    "open_to_work": 0.40,
+    "notice_period": 0.25,
+    "recruiter_response": 0.20,
+    "recency": 0.15,
+}
+assert abs(sum(AVAILABILITY_WEIGHTS.values()) - 1.0) < 1e-9, "AVAILABILITY_WEIGHTS must sum to 1.0"
+
+# Fit-score tier baselines (Step 2 of audit spec).
+FIT_TIER_BASELINES = {
+    4: (80, 100),  # 4/4 must-haves
+    3: (55, 75),   # 3/4
+    2: (30, 50),   # 2/4
+    1: (10, 25),   # 1/4 — explicitly flagged as not meeting core JD requirements
+    0: (0, 10),    # 0/4
+}
+
+# ============================================================================
 # Project impact evidence patterns
 # ============================================================================
 # Per user spec (2026-06-18): career evidence > skills. Each pattern is a
