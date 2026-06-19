@@ -190,6 +190,7 @@ def run(candidates_path: str | Path, out_path: str | Path, top_k: int = config.T
         if trap.is_honeypot:
             n_honeypots += 1
             honeypot_details.append((features, trap))
+            continue  # NEVER offer a honeypot to top-K, regardless of score
         if trap.is_keyword_stuffer:
             n_keyword_stuffers += 1
         if trap.is_template_summary:

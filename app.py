@@ -307,6 +307,9 @@ def rank_with_weights(
                        t.is_consulting_only, t.is_title_chaser]):
                 trap_stats["total_clean"] += 1
 
+            if t.is_honeypot:
+                continue  # NEVER offer a honeypot to top-K, regardless of score
+
             score = compute_final_score(cand)["final_score"]
             scored.append((score, cand.get("candidate_id", ""), cand, f, t))
 

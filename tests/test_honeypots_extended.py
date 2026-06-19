@@ -63,7 +63,8 @@ def test_synthetic_profile():
 
 
 def test_technology_age():
-    """Career started 2018, claims 8 years of LangChain (released 2022)."""
+    """Career started 2018, claims 8 years of LangChain AND LlamaIndex
+    (both released 2022). Two pre-release skills = honeypot."""
     cand = _make_candidate(
         profile={"years_of_experience": 8.0, "current_title": "ML Engineer"},
         career=[
@@ -74,6 +75,7 @@ def test_technology_age():
             # 8 years of LangChain (96 months) — would have started in 2018,
             # but LangChain was released in 2022.
             {"name": "LangChain", "proficiency": "expert", "endorsements": 10, "duration_months": 96},
+            {"name": "LlamaIndex", "proficiency": "expert", "endorsements": 10, "duration_months": 96},
         ],
     )
     f, t = _analyze(cand)

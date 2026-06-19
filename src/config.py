@@ -587,7 +587,10 @@ TRAP_FLOOR = 0.30  # Multiple traps floor at 30%
 # Honeypot detection
 # ============================================================================
 HONEYPOT_TAX = -1e9  # Force honeypots to bottom
-HONEYPOT_YOE_BUFFER_YEARS = 5  # YoE > career span + 5yr → honeypot
+HONEYPOT_YOE_BUFFER_YEARS = 8  # YoE > career span + 8yr → honeypot
+# Buffer widened from 5 to 8 to absorb legitimate gaps: PhD, parental leave,
+# military, freelancing. The audit spec still flags 25-YoE-fake profiles
+# like CAND_HP (25 YoE vs 6yr span).
 
 # Pre-LLM-era signals. JD: "people who understood retrieval and ranking
 # before it became fashionable". Pre-2020 production experience with
@@ -686,8 +689,17 @@ TECH_RELEASE_YEARS = {
 
 # Cross-field consistency: certain field combinations are suspicious
 # (e.g., "NLP Researcher" + "consulting-only career" + "no skills in NLP").
-NLP_KEYWORDS = ["nlp", "natural language", "language model", "llm", "text classification",
-                "named entity", "sentiment", "transformer", "tokeniz"]
+NLP_KEYWORDS = [
+    "nlp", "natural language", "language model", "llm", "large language model",
+    "text classification", "named entity", "ner", "sentiment", "transformer",
+    "tokeniz", "embedding", "question answering", "qa system", "chatbot",
+    "text generation", "summariz", "translation", "machine translation",
+    "text mining", "text analytics", "speech", "asr", "tts",
+    "semantic search", "semantic similarity", "semantic",
+    "dialogue", "conversational ai", "rag", "retrieval augmented",
+    "bge", "bert", "gpt", "t5", "roberta", "word2vec", "glove",
+    "clinical text", "biomedical text", "information extraction",
+]
 CV_KEYWORDS = ["computer vision", "image classification", "object detection",
                "segmentation", "opencv", "yolo", "cnn", "convolutional",
                "image recognition", "visual recognition", "image segmentation"]

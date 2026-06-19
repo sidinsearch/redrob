@@ -814,7 +814,9 @@ def _detect_honeypot_signals(
     # ----- 11. Technology age (skill before release) -----
     # A skill is "anachronistic" if the candidate could not plausibly have
     # used it: their career started well before the tech was released.
-    # Stricter: require 3+ years of pre-release, not 1.
+    # Stricter: require 3+ years of pre-release, not 1; AND 2+ skills
+    # must predate (single-skill FP is common — candidates do list tools
+    # they picked up in the first release year of the library).
     if career_history:
         earliest_year = None
         for c in career_history:
@@ -827,6 +829,7 @@ def _detect_honeypot_signals(
                 earliest_year = sd.year if earliest_year is None else min(earliest_year, sd.year)
         if earliest_year:
             current_year = date.today().year
+            anachronistic_count = 0
             for s in skills:
                 if not isinstance(s, dict):
                     continue
@@ -841,10 +844,10 @@ def _detect_honeypot_signals(
                     if tech in name:
                         # Flag only if the skill window is clearly before release.
                         if skill_start_year < release_year - config.HONEYPOT_TECH_AGE_GRACE_YEARS:
-                            features.technology_age_anomaly = True
+                            anachronistic_count += 1
                             break
-                if features.technology_age_anomaly:
-                    break
+            if anachronistic_count >= 2:
+                features.technology_age_anomaly = True
 
     # ----- 12. Synthetic profile (12+ AI skills, <2 YoE, 1 job, 90+ completeness) -----
     # Stricter thresholds: only the most obviously-fake profiles.
