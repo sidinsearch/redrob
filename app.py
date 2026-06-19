@@ -188,12 +188,21 @@ st.markdown("""
 
 @st.cache_data
 def load_sample_data() -> List[dict]:
-    """Load bundled sample candidates from relative path."""
-    # Try multiple possible locations
+    """Load bundled sample candidates from relative path.
+
+    On Streamlit Cloud / AWS / hosted setups, __file__ resolves to the deployed
+    project root, so the same-directory lookup is the one that fires. The
+    outer-directory lookups are kept for local-dev layouts where the repo
+    sits inside a workspace.
+    """
+    # Try multiple possible locations, in order of how hostable platforms
+    # lay things out. CWD-relative first because that's what `streamlit run`
+    # sets; then file-relative.
     possible_paths = [
-        Path(__file__).parent.parent / "sample_candidates.jsonl",
-        Path(__file__).parent.parent.parent / "sample_candidates.jsonl",
-        Path("sample_candidates.jsonl"),
+        Path("sample_candidates.jsonl"),                                # CWD
+        Path(__file__).parent / "sample_candidates.jsonl",               # same dir as app.py
+        Path(__file__).parent.parent / "sample_candidates.jsonl",       # one above (workspace)
+        Path(__file__).parent.parent.parent / "sample_candidates.jsonl",# two above (legacy)
     ]
     
     for sample_path in possible_paths:

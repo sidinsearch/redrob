@@ -161,6 +161,7 @@ redrob-ranker/
 │   ├── test_sample.py       # Test on the 50-candidate sample
 │   ├── test_traps.py        # Unit tests for trap detectors
 │   └── test_honeypots.py    # Unit tests for honeypot detection
+├── sample_candidates.jsonl  # 50-candidate sample, bundled for the Streamlit sandbox
 ├── docs/
 │   ├── ARCHITECTURE.md      # Full design doc (weights, data flow, compute budget)
 │   ├── METHODOLOGY.md       # How to defend the design at Stage 5

@@ -35,6 +35,7 @@
 candidates.jsonl
 candidates.jsonl.gz
 *.jsonl.gz
+# But the small bundled sample IS committed — see sample_candidates.jsonl
 
 # Bundled docs that came WITH the hackathon (not our source):
 # We re-include some of these in our repo (see "DO commit" below)

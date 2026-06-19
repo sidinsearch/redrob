@@ -30,6 +30,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY rank.py app.py ./
+COPY sample_candidates.jsonl ./
 COPY src/ ./src/
 COPY tests/ ./tests/
 COPY .streamlit/ ./.streamlit/
