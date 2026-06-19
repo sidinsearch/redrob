@@ -23,18 +23,19 @@ from __future__ import annotations
 # Tuned against the rubric (NDCG@10 50%, NDCG@50 30%, MAP 15%, P@10 5%)
 # and the trap types described in the architecture doc.
 
+# Weights rebalanced per user spec (2026-06-18): career evidence > skills.
+# Career history relevance and project impact now dominate; skills are
+# supporting signals, not the primary driver. This matches the 8 rules:
+# "Career evidence always beats skills", "Production experience always
+# beats certifications", "Search/retrieval/ranking/rec/relevance/matching/
+# personalization experience are the highest-value signals".
 WEIGHTS = {
-    "title_relevance": 0.20,
-    "experience_fit": 0.10,
-    "product_exp": 0.10,
-    "ai_skills_depth": 0.11,
-    "career_relevance": 0.11,
-    "education_score": 0.03,
-    "behavioral_score": 0.12,
-    "location_fit": 0.05,
-    "availability_score": 0.05,
-    "pre_llm_signal": 0.05,
-    "jd_must_have_score": 0.08,
+    "career_history_relevance": 0.40,  # biggest weight: career evidence
+    "project_impact": 0.20,            # new: deployed retrieval, built ranking, NDCG, A/B
+    "skills": 0.15,                    # supporting signal, not primary
+    "availability": 0.10,              # notice period, open-to-work
+    "company_quality": 0.10,           # product vs consulting, company prestige
+    "education": 0.05,                 # tier and field
 }
 assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-9, "WEIGHTS must sum to 1.0"
 
@@ -255,6 +256,95 @@ SKILL_INFLATION_THRESHOLD = 17  # >17 skills = suspicious
 # borderline cases (e.g., "HR Manager expert in Webpack with 0 months use")
 # which are clearly impossible profiles.
 EXPERT_SKILL_FAKE_THRESHOLD = 3  # "expert" in 3+ skills with 0 duration = honeypot
+
+# ============================================================================
+# Project impact evidence patterns
+# ============================================================================
+# Per user spec (2026-06-18): career evidence > skills. Each pattern is a
+# "did they actually do it?" signal in any job description.
+# Replaces naive "if Pinecone in skills: +10" with "if they deployed
+# retrieval: +25". A candidate who built ranking systems outranks a
+# candidate who merely knows Pinecone.
+PROJECT_IMPACT_PATTERNS = {
+    # Tier 1: Highest-value (Rule 6: search/retrieval/ranking/rec/relevance)
+    "deployed_retrieval": [
+        "deployed retrieval", "deployed a retrieval", "production retrieval",
+        "shipped retrieval", "retrieval system to production", "retrieval in production",
+        "scaled retrieval", "retrieval at scale", "hybrid search production",
+        "vector search production", "semantic search production",
+        "embeddings-based retrieval", "serving embeddings",
+    ],
+    "built_ranking": [
+        "built ranking", "built a ranking", "developed ranking", "designed ranking",
+        "ranking system", "ranking pipeline", "ranking model", "ranking algorithm",
+        "learning to rank", "learning-to-rank", "l2r", "lambdamart", "ranknet",
+        "rankboost", "listwise", "pairwise", "rerank", "re-rank", "re-ranking",
+        "search ranking", "ranking service", "ranker",
+    ],
+    "recommendation_or_personalization": [
+        "recommendation system", "recommender system", "recommender",
+        "personalization", "personalisation", "candidate matching", "job matching",
+        "user matching", "content recommendation", "feed ranking",
+        "similar jobs", "similar candidates", "people you may know",
+        "collaborative filtering", "matrix factorization", "two-tower",
+        "candidate generation",
+    ],
+    # Tier 2: Evaluation expertise (Rule 5: major ranking factor)
+    "improved_ndcg_or_eval": [
+        "improved ndcg", "ndcg improvement", "lifted ndcg", "boosted ndcg",
+        "improved map", "improved mrr", "improved auc", "improved recall",
+        "ndcg", "mrr", "map@", "auc", "evaluation framework",
+        "offline evaluation", "online evaluation", "offline-online correlation",
+        "evaluation pipeline", "evaluation infrastructure",
+    ],
+    "ran_ab_tests": [
+        "a/b test", "ab test", "a-b test", "online experiment",
+        "ramp experiment", "holdout experiment", "interleaving",
+        "experiment framework", "experimentation platform",
+        "ramped rollout", "ab testing", "controlled experiment",
+    ],
+    # Tier 3: Search infrastructure
+    "search_infrastructure": [
+        "elasticsearch cluster", "opensearch cluster", "solr cluster",
+        "vector index", "faiss index", "pinecone index", "weaviate instance",
+        "qdrant deployment", "milvus cluster", "vespa",
+        "hybrid search", "bm25 + dense", "dense + sparse",
+        "search infrastructure", "search platform", "search service",
+    ],
+    # Tier 4: Production deployment (Rule 4: production > certifications)
+    "production_ml": [
+        "deployed ml", "ml in production", "model in production",
+        "production ml", "production model", "serving model", "model serving",
+        "mlops", "model deployment", "model monitoring", "model drift",
+        "training pipeline", "inference pipeline", "feature pipeline",
+        "real-time inference", "batch inference", "online inference",
+    ],
+    # Tier 5: Scale & impact
+    "scale_impact": [
+        "million users", "users at scale", "production scale",
+        "scaled to", "lowered latency", "improved throughput",
+        "reduced inference time", "cut latency", "10ms latency", "100ms",
+        "billion requests", "million requests", "million candidates",
+    ],
+}
+
+# Highest-value categories (Rule 6: search/rec/relevance/matching/personalization)
+HIGH_VALUE_CATEGORIES = [
+    "search", "retrieval", "ranking", "recommendation", "recommender",
+    "relevance", "matching", "personalization", "personalisation",
+]
+
+# Score weights for project impact (sum to 1.0)
+PROJECT_IMPACT_WEIGHTS = {
+    "deployed_retrieval": 0.25,
+    "built_ranking": 0.25,
+    "recommendation_or_personalization": 0.20,
+    "improved_ndcg_or_eval": 0.15,
+    "ran_ab_tests": 0.10,
+    "search_infrastructure": 0.03,
+    "production_ml": 0.01,
+    "scale_impact": 0.01,
+}
 
 # ============================================================================
 # Trap multipliers

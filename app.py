@@ -209,11 +209,16 @@ def load_sample_data() -> List[dict]:
 
 
 def parse_uploaded_file(uploaded_file) -> List[dict]:
-    """Parse uploaded JSONL or JSON array file."""
-    content = uploaded_file.read()
+    """Parse uploaded JSONL or JSON array file. Cached so re-renders don't re-parse."""
+    return _parse_uploaded_file_cached(uploaded_file.id, uploaded_file.getvalue())
+
+
+@st.cache_data(show_spinner=False)
+def _parse_uploaded_file_cached(_file_id: str, content: bytes) -> List[dict]:
+    """Internal cached parser. The file_id is a cache-key hint; content is the bytes."""
     if isinstance(content, bytes):
         content = content.decode("utf-8")
-    
+
     text = content.strip()
     if text.startswith("["):
         data = json.loads(text)
@@ -372,20 +377,17 @@ def main():
         # Interactive weight tuning
         st.markdown("### 🎚️ Weight Tuning")
         st.markdown("Adjust scoring weights (must sum to 1.0)")
-    
+
         weights = {}
         weight_names = [
-            ("title_relevance", "Title relevance", 0.25),
-            ("experience_fit", "Experience fit", 0.12),
-            ("product_exp", "Product experience", 0.10),
-            ("ai_skills_depth", "AI skills depth", 0.15),
-            ("career_relevance", "Career relevance", 0.10),
-            ("education_score", "Education", 0.03),
-            ("behavioral_score", "Behavioral signals", 0.15),
-            ("location_fit", "Location fit", 0.05),
-            ("availability_score", "Availability", 0.05),
+            ("career_history_relevance", "Career history relevance", 0.40),
+            ("project_impact", "Project impact (evidence)", 0.20),
+            ("skills", "Skills (supporting signal)", 0.15),
+            ("availability", "Availability", 0.10),
+            ("company_quality", "Company quality", 0.10),
+            ("education", "Education", 0.05),
         ]
-    
+
         for key, label, default in weight_names:
             weights[key] = st.slider(
                 label,
@@ -445,45 +447,72 @@ def main():
             type=["jsonl", "json"],
             help="Upload candidates.jsonl (any size — we'll process all and output top-100)"
         )
-    
+
         if uploaded is None:
             st.info("📤 Upload a JSONL file to begin ranking")
             st.stop()
-    
+
+        # Cached parser: same file → same candidates, no re-parse on tab change
         with st.spinner("Parsing uploaded file..."):
             candidates = parse_uploaded_file(uploaded)
-    
+
         st.success(f"✅ Loaded **{len(candidates):,}** candidates")
-    
+
     else:
         with st.spinner("Loading sample data..."):
             candidates = load_sample_data()
-    
+
         if not candidates:
             st.error("❌ No sample data found. Please upload a JSONL file.")
             st.stop()
-    
+
         st.success(f"✅ Loaded **{len(candidates)}** sample candidates")
 
 
     # ----------------------------------------------------------------------------
-    # Run ranking
+    # Run ranking (cached: only re-rank when weights / top_k / source change)
     # ----------------------------------------------------------------------------
 
     st.divider()
 
-    with st.spinner(f"Ranking {len(candidates):,} candidates..."):
-        t0 = time.perf_counter()
-        rows, trap_stats, honeypot_rows = rank_with_weights(candidates, weights, top_k=top_k)
-        elapsed = time.perf_counter() - t0
+    # Build a stable cache key from the data source + weights + top_k.
+    # session_state is keyed by the upload file id (or 'sample' for sample data).
+    if data_source == "Upload JSONL file" and uploaded is not None:
+        cache_source_key = uploaded.file_id if hasattr(uploaded, "file_id") else "uploaded"
+    else:
+        cache_source_key = "sample"
+    cache_key = (cache_source_key, tuple(sorted(weights.items())), top_k)
+
+    # Only run ranking if cache_key changed.
+    if (
+        "rank_cache_key" not in st.session_state
+        or st.session_state.rank_cache_key != cache_key
+        or "rank_rows" not in st.session_state
+    ):
+        with st.spinner(f"Ranking {len(candidates):,} candidates..."):
+            t0 = time.perf_counter()
+            rows, trap_stats, honeypot_rows = rank_with_weights(candidates, weights, top_k=top_k)
+            elapsed = time.perf_counter() - t0
+        st.session_state.rank_cache_key = cache_key
+        st.session_state.rank_rows = rows
+        st.session_state.rank_trap_stats = trap_stats
+        st.session_state.rank_honeypot_rows = honeypot_rows
+        st.session_state.rank_candidates = candidates
+        st.session_state.rank_elapsed = elapsed
+    else:
+        rows = st.session_state.rank_rows
+        trap_stats = st.session_state.rank_trap_stats
+        honeypot_rows = st.session_state.rank_honeypot_rows
+        candidates = st.session_state.rank_candidates
+        elapsed = st.session_state.rank_elapsed
 
     # Metrics row
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Candidates", f"{len(candidates):,}")
     col2.metric("Top-K", len(rows))
     col3.metric("Runtime", f"{elapsed:.2f}s")
-    col4.metric("Honeypots", trap_stats.get("in_topk", 0))
-    col5.metric("Clean", trap_stats.get("total_clean", 0))
+    col4.metric("Honeypots in Top-100", trap_stats.get("in_topk", 0))
+    col5.metric("Total Honeypots (excluded)", len(honeypot_rows))
 
 
     # ----------------------------------------------------------------------------
@@ -496,7 +525,7 @@ def main():
         "📊 Score Breakdown",
         "🔍 Candidate Drill-down",
         "⚖️ Fairness Audit",
-        "🍯 Honeypots"
+        "🍯 Excluded Honeypots"
     ])
 
 
@@ -662,34 +691,53 @@ def main():
     # ----------------------------------------------------------------------------
 
     with tab3:
-        st.markdown("### 📊 Score Component Breakdown")
-    
+        st.markdown("### 📊 Score Component Breakdown (Evidence-based)")
+
         # Select candidate for breakdown
         selected_id = st.selectbox(
             "Select candidate",
             [r["candidate_id"] for r in rows],
             format_func=lambda x: f"Rank {next(r['rank'] for r in rows if r['candidate_id'] == x)}: {x}"
         )
-    
+
         if selected_id:
             row = next(r for r in rows if r["candidate_id"] == selected_id)
             f = row["features"]
-        
-            # Component scores
+
+            # Compute the new evidence-based component scores (matching scoring.py)
+            from scoring import (
+                _career_history_relevance, _project_impact, _skills_score,
+                _availability_score, _company_quality_score, compute_relevance,
+                compute_authenticity,
+            )
+            from trap_detector import TrapInfo
+            trap = row["traps"]
+            # Quick trap info stub for company_quality
+            trap_stub = type("T", (), {
+                "is_consulting_only": trap.is_consulting_only,
+                "is_keyword_stuffer": False,
+                "is_template_summary": False,
+            })()
+
+            chr_score = _career_history_relevance(f)
+            pi_score = _project_impact(f)
+            sk_score = _skills_score(f)
+            av_score = _availability_score(f)
+            cq_score = _company_quality_score(f, trap_stub)
+            ed_score = f.education_score
+
+            w = weights
             components = {
-                "Title relevance": f.title_score * 0.25,
-                "Experience fit": f.experience_fit * 0.12,
-                "Product experience": f.product_exp_score * 0.10,
-                "AI skills depth": f.ai_skills_depth * 0.15,
-                "Career relevance": (f.career_ai_keyword_hits / 10) * 0.10,  # Approximate
-                "Education": f.education_score * 0.03,
-                "Behavioral": f.behavioral_score * 0.15,
-                "Location": f.location_score * 0.05,
-                "Availability": f.availability_score * 0.05,
+                "Career history relevance (40%)": chr_score * w.get("career_history_relevance", 0.40),
+                "Project impact (20%)": pi_score * w.get("project_impact", 0.20),
+                "Skills (15%)": sk_score * w.get("skills", 0.15),
+                "Availability (10%)": av_score * w.get("availability", 0.10),
+                "Company quality (10%)": cq_score * w.get("company_quality", 0.10),
+                "Education (5%)": ed_score * w.get("education", 0.05),
             }
-        
+
             col1, col2 = st.columns(2)
-        
+
             with col1:
                 st.markdown("#### Component Contributions")
                 fig = go.Figure(data=[
@@ -705,7 +753,7 @@ def main():
                     showlegend=False,
                 )
                 st.plotly_chart(fig, use_container_width=True)
-        
+
             with col2:
                 st.markdown("#### Score Distribution")
                 fig = px.pie(
@@ -717,20 +765,31 @@ def main():
                 fig.update_traces(textposition='inside', textinfo='percent+label')
                 fig.update_layout(showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
-        
+
+            # Evidence flags (Rule 6: high-value signals)
+            st.markdown("#### Project Impact Evidence (Rule 6)")
+            ev_col1, ev_col2, ev_col3 = st.columns(3)
+            with ev_col1:
+                st.markdown(f"**Ranking evidence:** {'✅' if f.has_ranking_evidence else '❌'}")
+                st.markdown(f"**Retrieval evidence:** {'✅' if f.has_retrieval_evidence else '❌'}")
+            with ev_col2:
+                st.markdown(f"**Eval evidence:** {'✅' if f.has_eval_evidence else '❌'}")
+                st.markdown(f"**A/B test evidence:** {'✅' if f.has_ab_test_evidence else '❌'}")
+            with ev_col3:
+                st.markdown(f"**Production evidence:** {'✅' if f.has_production_evidence else '❌'}")
+                st.markdown(f"**High-value roles:** {f.high_value_role_count}")
+
             # Raw scores table
             st.markdown("#### Raw Component Scores")
             raw_df = pd.DataFrame([
-                {"Component": k, "Raw Score": f"{v:.3f}", "Weight": f"{weights.get(k.lower().replace(' ', '_'), 0):.2f}"}
-                for k, v in [
-                    ("Title relevance", f.title_score),
-                    ("Experience fit", f.experience_fit),
-                    ("Product experience", f.product_exp_score),
-                    ("AI skills depth", f.ai_skills_depth),
-                    ("Education", f.education_score),
-                    ("Behavioral", f.behavioral_score),
-                    ("Location", f.location_score),
-                    ("Availability", f.availability_score),
+                {"Component": k, "Raw Score (0-1)": f"{v:.3f}", "Weight": f"{w.get(key, 0):.2f}"}
+                for k, v, key in [
+                    ("Career history relevance", chr_score, "career_history_relevance"),
+                    ("Project impact (evidence)", pi_score, "project_impact"),
+                    ("Skills", sk_score, "skills"),
+                    ("Availability", av_score, "availability"),
+                    ("Company quality", cq_score, "company_quality"),
+                    ("Education", ed_score, "education"),
                 ]
             ])
             st.dataframe(raw_df, width="stretch", hide_index=True)
@@ -903,11 +962,15 @@ def main():
 
 
     # ----------------------------------------------------------------------------
-    # Tab 6: Honeypots
+    # Tab 6: Excluded Honeypots (full pool, NOT just top-100)
     # ----------------------------------------------------------------------------
     with tab6:
-        st.markdown("### 🍯 Honeypot Detection Report")
-        st.caption("Candidates with impossibly wrong profiles. These are forced to the bottom of the ranking (score = -1e9).")
+        st.markdown("### 🍯 Excluded Honeypots (Full Pool)")
+        st.caption(
+            "Candidates with impossibly wrong profiles that were excluded from ranking. "
+            "These are detected across the entire candidate pool (not just the top-100). "
+            "All are forced to a score of -1e9 and will never appear in the ranked output."
+        )
         n_hp = len(honeypot_rows)
         if n_hp == 0:
             st.success("🎉 No honeypots detected in the candidate pool!")

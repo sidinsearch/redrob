@@ -126,6 +126,19 @@ class Features:
     pre_llm_signal: float = 0.0
     pre_llm_roles: int = 0
 
+    # Project impact evidence (Rule 6: search/rec/relevance are highest-value)
+    # Counts of evidence patterns in career descriptions — used by
+    # project_impact scoring.
+    project_impact_counts: dict = field(default_factory=dict)
+    # High-value category hits (search/retrieval/ranking/rec/relevance)
+    high_value_role_count: int = 0
+    # Did the candidate produce *evidence* in any job description?
+    has_ranking_evidence: bool = False
+    has_retrieval_evidence: bool = False
+    has_eval_evidence: bool = False
+    has_ab_test_evidence: bool = False
+    has_production_evidence: bool = False
+
     # Pre-built blob for fast matching (career_relevance uses this)
     search_blob: str = ""
 
@@ -392,6 +405,75 @@ def _analyze_career(career_history: list, search_blob: str) -> dict:
     for category, patterns in config.JD_MUST_HAVE_PATTERNS.items():
         if any(p in search_blob for p in patterns):
             out["matched_must_haves"].append(category)
+
+    return out
+
+
+def _analyze_project_impact(career_history: list) -> dict:
+    """Detect *evidence* of building production systems in any job description.
+
+    Per user spec (2026-06-18): career evidence always beats skills. We score
+    based on what candidates *did*, not what they list. A candidate who
+    built ranking systems outranks a candidate who merely knows Pinecone.
+
+    ponytail: this is a single-pass scan over career descriptions, similar
+    to _analyze_career but focused on *evidence phrases* rather than
+    keyword counts.
+    """
+    out = {
+        "project_impact_counts": {},
+        "high_value_role_count": 0,
+        "has_ranking_evidence": False,
+        "has_retrieval_evidence": False,
+        "has_eval_evidence": False,
+        "has_ab_test_evidence": False,
+        "has_production_evidence": False,
+    }
+
+    if not career_history:
+        return out
+
+    # Build a combined blob of all career descriptions + titles.
+    all_text_parts = []
+    for c in career_history:
+        desc = (c.get("description") or "").lower()
+        title = (c.get("title") or "").lower()
+        all_text_parts.append(desc + " " + title)
+    all_text = " ".join(all_text_parts)
+
+    # Count evidence hits for each project impact category.
+    for category, patterns in config.PROJECT_IMPACT_PATTERNS.items():
+        hits = sum(1 for p in patterns if p in all_text)
+        if hits > 0:
+            out["project_impact_counts"][category] = hits
+
+    # Set the per-category booleans (used by reasoning + UI).
+    out["has_ranking_evidence"] = (
+        out["project_impact_counts"].get("built_ranking", 0) > 0
+        or out["project_impact_counts"].get("recommendation_or_personalization", 0) > 0
+    )
+    out["has_retrieval_evidence"] = (
+        out["project_impact_counts"].get("deployed_retrieval", 0) > 0
+        or out["project_impact_counts"].get("search_infrastructure", 0) > 0
+    )
+    out["has_eval_evidence"] = (
+        out["project_impact_counts"].get("improved_ndcg_or_eval", 0) > 0
+    )
+    out["has_ab_test_evidence"] = (
+        out["project_impact_counts"].get("ran_ab_tests", 0) > 0
+    )
+    out["has_production_evidence"] = (
+        out["project_impact_counts"].get("production_ml", 0) > 0
+        or out["project_impact_counts"].get("scale_impact", 0) > 0
+    )
+
+    # Count high-value roles (any role whose title matches the highest-value
+    # categories: search, retrieval, ranking, recommendation, relevance,
+    # matching, personalization).
+    for c in career_history:
+        title = (c.get("title") or "").lower()
+        if any(cat in title for cat in config.HIGH_VALUE_CATEGORIES):
+            out["high_value_role_count"] += 1
 
     return out
 
@@ -921,6 +1003,9 @@ def extract_features(candidate: dict) -> Features:
     # Career
     career_features = _analyze_career(career_history, search_blob)
 
+    # Project impact evidence (Rule 6: career evidence > skills)
+    impact_features = _analyze_project_impact(career_history)
+
     # Education
     edu_features = _analyze_education(education)
 
@@ -990,6 +1075,13 @@ def extract_features(candidate: dict) -> Features:
         template_summary_match=template_match,
         search_blob=search_blob,
         matched_must_haves=career_features["matched_must_haves"],
+        project_impact_counts=impact_features["project_impact_counts"],
+        high_value_role_count=impact_features["high_value_role_count"],
+        has_ranking_evidence=impact_features["has_ranking_evidence"],
+        has_retrieval_evidence=impact_features["has_retrieval_evidence"],
+        has_eval_evidence=impact_features["has_eval_evidence"],
+        has_ab_test_evidence=impact_features["has_ab_test_evidence"],
+        has_production_evidence=impact_features["has_production_evidence"],
     )
 
     # Honeypot detection (mutates f)
