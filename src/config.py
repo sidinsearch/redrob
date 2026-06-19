@@ -23,19 +23,29 @@ from __future__ import annotations
 # Tuned against the rubric (NDCG@10 50%, NDCG@50 30%, MAP 15%, P@10 5%)
 # and the trap types described in the architecture doc.
 
-# Weights rebalanced per user spec (2026-06-18): career evidence > skills.
-# Career history relevance and project impact now dominate; skills are
-# supporting signals, not the primary driver. This matches the 8 rules:
-# "Career evidence always beats skills", "Production experience always
-# beats certifications", "Search/retrieval/ranking/rec/relevance/matching/
-# personalization experience are the highest-value signals".
+# Weights rebalanced per user spec (2026-06-19).
+#
+# Career evidence still dominates the fit score, but availability is now
+# a MULTIPLICATIVE filter (not part of the additive sum). This means a
+# perfect-on-paper candidate with poor availability drops dramatically
+# rather than just being a little lower in an additive mix.
+#
+# Final score = fit_score × availability_multiplier × trap_multiplier
+#
+# Fit score weights (sum to 1.0):
+# - career_history_relevance: 0.45 (was 0.40, +0.05)
+# - project_impact: 0.25 (was 0.20, +0.05)
+# - skills: 0.20 (was 0.15, +0.05)
+# - company_quality: 0.05 (was 0.10, -0.05)
+# - education: 0.05 (was 0.05, unchanged)
+# - availability: 0.00 (was 0.10, moved to multiplicative filter)
 WEIGHTS = {
-    "career_history_relevance": 0.40,  # biggest weight: career evidence
-    "project_impact": 0.20,            # new: deployed retrieval, built ranking, NDCG, A/B
-    "skills": 0.15,                    # supporting signal, not primary
-    "availability": 0.10,              # notice period, open-to-work
-    "company_quality": 0.10,           # product vs consulting, company prestige
-    "education": 0.05,                 # tier and field
+    "career_history_relevance": 0.45,
+    "project_impact": 0.25,
+    "skills": 0.20,
+    "availability": 0.00,  # used as a multiplicative filter, not in the additive sum
+    "company_quality": 0.05,
+    "education": 0.05,
 }
 assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-9, "WEIGHTS must sum to 1.0"
 

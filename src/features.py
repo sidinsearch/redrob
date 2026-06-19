@@ -87,6 +87,11 @@ class Features:
     github_activity_score: float = -1.0
     search_appearance_30d: int = 0
     saved_by_recruiters_30d: int = 0
+    # Recency (days since last active) — 999 if never active. Used by the
+    # availability multiplier in scoring.py per JD: "a perfect-on-paper
+    # candidate who hasn't logged in for 6 months ... is not actually available".
+    days_since_active: int = 999
+    last_active_date: str = ""
     interview_completion_rate: float = 0.0
     offer_acceptance_rate: float = -1.0
     verified_email: bool = False
@@ -1019,6 +1024,18 @@ def extract_features(candidate: dict) -> Features:
     notice = int(rs.get("notice_period_days") or 0)
     availability = config.notice_period_score(notice)
 
+    # Last active date → days_since_active (used by availability multiplier).
+    # 999 means "never active" or "missing" — treated as a strong penalty.
+    last_active_str = rs.get("last_active_date", "") or ""
+    if last_active_str:
+        try:
+            last_active_dt = date.fromisoformat(last_active_str)
+            days_since_active = max(0, (date.today() - last_active_dt).days)
+        except (ValueError, TypeError):
+            days_since_active = 999
+    else:
+        days_since_active = 999
+
     # Template summary trap
     summary = utils.lc(profile.get("summary", ""))
     template_match = config.TEMPLATE_SUMMARY_PHRASE.lower() in summary
@@ -1062,6 +1079,8 @@ def extract_features(candidate: dict) -> Features:
         github_activity_score=float(rs.get("github_activity_score") or -1.0),
         search_appearance_30d=int(rs.get("search_appearance_30d") or 0),
         saved_by_recruiters_30d=int(rs.get("saved_by_recruiters_30d") or 0),
+        days_since_active=days_since_active,
+        last_active_date=last_active_str,
         interview_completion_rate=float(rs.get("interview_completion_rate") or 0),
         offer_acceptance_rate=float(rs.get("offer_acceptance_rate") or -1.0),
         verified_email=bool(rs.get("verified_email", False)),

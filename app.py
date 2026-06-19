@@ -384,11 +384,11 @@ def main():
 
         weights = {}
         weight_names = [
-            ("career_history_relevance", "Career history relevance", 0.40),
-            ("project_impact", "Project impact (evidence)", 0.20),
-            ("skills", "Skills (supporting signal)", 0.15),
-            ("availability", "Availability", 0.10),
-            ("company_quality", "Company quality", 0.10),
+            ("career_history_relevance", "Career history relevance", 0.45),
+            ("project_impact", "Project impact (evidence)", 0.25),
+            ("skills", "Skills (supporting signal)", 0.20),
+            ("availability", "Availability (multiplicative)", 0.00),
+            ("company_quality", "Company quality", 0.05),
             ("education", "Education", 0.05),
         ]
 
@@ -695,7 +695,13 @@ def main():
     # ----------------------------------------------------------------------------
 
     with tab3:
-        st.markdown("### 📊 Score Component Breakdown (Evidence-based)")
+        st.markdown("### 📊 Score Component Breakdown (Fit × Availability)")
+
+        st.caption(
+            "Final score = **fit_score** × **availability_multiplier** × trap_multiplier. "
+            "Availability is a multiplicative filter per JD: 'a perfect-on-paper candidate "
+            "who hasn't logged in for 6 months is not actually available.'"
+        )
 
         # Select candidate for breakdown
         selected_id = st.selectbox(
@@ -708,61 +714,61 @@ def main():
             row = next(r for r in rows if r["candidate_id"] == selected_id)
             f = row["features"]
 
-            # Compute the new evidence-based component scores (matching scoring.py)
+            # Compute the new fit + availability components (matching scoring.py)
             from scoring import (
                 _career_history_relevance, _project_impact, _skills_score,
-                _availability_score, _company_quality_score, compute_relevance,
-                compute_authenticity,
+                _company_quality_score, compute_relevance, compute_availability,
             )
             from trap_detector import TrapInfo
             trap = row["traps"]
-            # Quick trap info stub for company_quality
             trap_stub = type("T", (), {
                 "is_consulting_only": trap.is_consulting_only,
                 "is_keyword_stuffer": False,
                 "is_template_summary": False,
+                "is_title_chaser": False,
             })()
 
             chr_score = _career_history_relevance(f)
             pi_score = _project_impact(f)
             sk_score = _skills_score(f)
-            av_score = _availability_score(f)
             cq_score = _company_quality_score(f, trap_stub)
             ed_score = f.education_score
+            fit_score = compute_relevance(f)
+            avail_score = compute_availability(f)
 
+            # ---- Fit components (additive, weights rebalanced) ----
             w = weights
-            components = {
-                "Career history relevance (40%)": chr_score * w.get("career_history_relevance", 0.40),
-                "Project impact (20%)": pi_score * w.get("project_impact", 0.20),
-                "Skills (15%)": sk_score * w.get("skills", 0.15),
-                "Availability (10%)": av_score * w.get("availability", 0.10),
-                "Company quality (10%)": cq_score * w.get("company_quality", 0.10),
+            fit_components = {
+                "Career history relevance (45%)": chr_score * w.get("career_history_relevance", 0.45),
+                "Project impact (25%)": pi_score * w.get("project_impact", 0.25),
+                "Skills (20%)": sk_score * w.get("skills", 0.20),
+                "Company quality (5%)": cq_score * w.get("company_quality", 0.05),
                 "Education (5%)": ed_score * w.get("education", 0.05),
             }
 
             col1, col2 = st.columns(2)
 
             with col1:
-                st.markdown("#### Component Contributions")
+                st.markdown("#### Fit Component Contributions")
                 fig = go.Figure(data=[
                     go.Bar(
-                        x=list(components.keys()),
-                        y=list(components.values()),
+                        x=list(fit_components.keys()),
+                        y=list(fit_components.values()),
                         marker_color=px.colors.qualitative.Pastel,
                     )
                 ])
                 fig.update_layout(
                     xaxis_tickangle=-45,
-                    yaxis_title="Weighted Score Contribution",
+                    yaxis_title="Fit Score Contribution",
                     showlegend=False,
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
             with col2:
-                st.markdown("#### Score Distribution")
+                st.markdown("#### Fit Distribution")
                 fig = px.pie(
-                    values=list(components.values()),
-                    names=list(components.keys()),
+                    values=list(fit_components.values()),
+                    names=list(fit_components.keys()),
                     color_discrete_sequence=px.colors.qualitative.Pastel,
                     hole=0.3,
                 )
@@ -770,7 +776,61 @@ def main():
                 fig.update_layout(showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
 
-            # Evidence flags (Rule 6: high-value signals)
+            # ---- Availability breakdown (multiplicative) ----
+            st.markdown("#### Availability Multiplier Breakdown")
+            st.caption(
+                "All four signals MULTIPLIED together — multiple weak signals compound. "
+                "A perfect-on-paper candidate with 0% response × 4-month inactive drops to "
+                "~0.13 of fit score, not just 10% lower."
+            )
+
+            # Compute each multiplier for display
+            open_mult = 1.0 if f.open_to_work else 0.5
+            notice = f.notice_period_days
+            if notice <= 0:
+                notice_mult = 1.0
+            elif notice <= 30:
+                notice_mult = 1.0
+            elif notice <= 60:
+                notice_mult = 0.85
+            elif notice <= 90:
+                notice_mult = 0.65
+            elif notice <= 120:
+                notice_mult = 0.45
+            else:
+                notice_mult = 0.30
+            resp_mult = 0.5 + 0.5 * max(0.0, min(1.0, f.recruiter_response_rate))
+            days = f.days_since_active
+            if days <= 30:
+                active_mult = 1.0
+            elif days <= 90:
+                active_mult = 0.90
+            elif days <= 180:
+                active_mult = 0.65
+            elif days <= 365:
+                active_mult = 0.40
+            elif days == 999:
+                active_mult = 0.30
+            else:
+                active_mult = 0.20
+
+            av_col1, av_col2, av_col3, av_col4 = st.columns(4)
+            with av_col1:
+                st.metric("Open to work", f"{'✅' if f.open_to_work else '❌'}", f"{open_mult:.2f}x")
+                st.caption(f"Notice: {notice}d → {notice_mult:.2f}x")
+            with av_col2:
+                st.metric("Recruiter response", f"{f.recruiter_response_rate:.0%}", f"{resp_mult:.2f}x")
+                st.caption(f"Active: {days}d ago → {active_mult:.2f}x")
+            with av_col3:
+                st.metric("Fit score", f"{fit_score:.3f}")
+                st.caption("(additive)")
+            with av_col4:
+                st.metric("Availability", f"{avail_score:.3f}")
+                st.caption("(multiplicative)")
+
+            st.markdown(f"**Final score = {fit_score:.3f} × {avail_score:.3f} = {fit_score * avail_score:.3f}**")
+
+            # ---- Evidence flags (Rule 6) ----
             st.markdown("#### Project Impact Evidence (Rule 6)")
             ev_col1, ev_col2, ev_col3 = st.columns(3)
             with ev_col1:
@@ -783,15 +843,14 @@ def main():
                 st.markdown(f"**Production evidence:** {'✅' if f.has_production_evidence else '❌'}")
                 st.markdown(f"**High-value roles:** {f.high_value_role_count}")
 
-            # Raw scores table
+            # ---- Raw scores table ----
             st.markdown("#### Raw Component Scores")
             raw_df = pd.DataFrame([
-                {"Component": k, "Raw Score (0-1)": f"{v:.3f}", "Weight": f"{w.get(key, 0):.2f}"}
+                {"Component": k, "Raw Score (0-1)": f"{v:.3f}", "Fit Weight": f"{w.get(key, 0):.2f}"}
                 for k, v, key in [
                     ("Career history relevance", chr_score, "career_history_relevance"),
                     ("Project impact (evidence)", pi_score, "project_impact"),
                     ("Skills", sk_score, "skills"),
-                    ("Availability", av_score, "availability"),
                     ("Company quality", cq_score, "company_quality"),
                     ("Education", ed_score, "education"),
                 ]
