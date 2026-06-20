@@ -5,22 +5,28 @@
 # ============================================================================
 # Team identity
 # ============================================================================
-team_name: "redrob-ranker"
+team_name: "byte bots"
 
 primary_contact:
-  name: "Your Name"
-  email: "primary@example.com"
-  phone: "+91-XXXXXXXXXX"
+  name: "Prathamesh Mane"
+  email: "prathameshmane3622@gmail.com"
+  phone: "+91-9970921579"
 
 team_members:
-  - name: "Your Name"
-    email: "your.email@example.com"
-    role: "Solo"
+  - name: "Siddharth Shinde"
+    email: "siddhushinde788@gmail.comm"
+    role: "Team"
+  - name: "Jaid Tamboli"
+    email: "jaidtamboli101@gmail.com"
+    role: "Team"
+  - name: "Prathamesh Mane"
+    email: "prathameshmane3622@gmail.com"
+    role: "Team"
 
 # ============================================================================
 # Code and reproducibility
 # ============================================================================
-github_repo: "https://github.com/YOUR_USERNAME/redrob-ranker"
+github_repo: "https://github.com/sidinsearch/redrob"
 sandbox_link: "https://huggingface.co/spaces/YOUR_USERNAME/redrob-ranker-sandbox"
 reproduce_command: "python rank.py --candidates ./candidates.jsonl --out ./output/submission.csv"
 
