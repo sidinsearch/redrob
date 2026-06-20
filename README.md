@@ -64,61 +64,56 @@ The current submission's top-5 (100K candidate pool, 0 honeypots in top-100):
 Per the audit spec, `final_score = (fit_score / 100) × availability_multiplier`.
 
 ```
-candidate record
-      │
-      ▼
-┌────────────────────────────────────────────────────────────────────┐
-│  1. Parse  ─── JSONL streaming                                       │
-└────────────┬───────────────────────────────────────────────────────┘
-             ▼
-┌────────────────────────────────────────────────────────────────────┐
-│  2. Features  ─── 70+ signals per candidate                          │
-│      title, YoE, AI-skill depth, product-company exp,                │
-│      career history NLP, education tier, location, …                 │
-└────────────┬───────────────────────────────────────────────────────┘
-             ▼
-┌────────────────────────────────────────────────────────────────────┐
-│  3. Must-haves  ─── evidence-based, NOT skill-list keyword matching  │
-│      4 must-haves, each requiring a sentence in career_history:      │
-│        • production embeddings-based retrieval                       │
-│        • production vector DB / hybrid search                        │
-│        • eval framework design for ranking                           │
-│        • strong Python in a real system                              │
-│      + 5 nice-to-haves (e.g., FAISS, PyTorch, search infra)          │
-│      + hard disqualifiers: research-only, consulting-only,           │
-│        CV/speech/robotics primary, LangChain <12 mo,                 │
-│        no production code 18 mo.                                    │
-└────────────┬───────────────────────────────────────────────────────┘
-             ▼
-┌────────────────────────────────────────────────────────────────────┐
-│  4. fit_score  (0–100)  ── gated on must-haves met (0–4)             │
-│      Tier baselines:  4/4 → [80,100],  3/4 → [55,75],                │
-│                       2/4 → [30,50],   1/4 → [10,25],  0/4 → [0,10]  │
-└────────────┬───────────────────────────────────────────────────────┘
-             ▼
-┌────────────────────────────────────────────────────────────────────┐
-│  5. Trap detector  ─── 4 multiplicative traps + 12 honeypot flags     │
-│      keyword stuffer (×0.40) │ template (×0.70)                      │
-│      consulting only (×0.75) │ title chaser (×0.85)                 │
-│      → honeypots skipped from top-K entirely (architectural)         │
-└────────────┬───────────────────────────────────────────────────────┘
-             ▼
-┌────────────────────────────────────────────────────────────────────┐
-│  6. Availability  ─── additive filter, clipped [0.1, 1.0]            │
-│      open_to_work 40% │ notice_period 25% │ response_rate 20% │ recency 15% │
-└────────────┬───────────────────────────────────────────────────────┘
-             ▼
-   final_score  =  (fit_score / 100)  ×  availability_multiplier
-             │
-             ▼
-   sort desc by score, then by candidate_id  →  top-100
-             │
-             ▼
-   8 reasoning templates × 4 rank tiers  →  ≤300-char "why"
-             │
-             ▼
-       output/submission.csv  (CAND_NNNNNNN, rank, score, reasoning)
-       output/submission.honeypots.csv  (full honeypot details)
+                      candidates.jsonl (100K)
+                              │
+                              ▼
+      ┌────────────────────────────────────────────────────────────────┐
+      │  1. PARSE  JSONL streaming reader                              │
+      │                                                                │
+      └────────────────────────────────────────────────────────────────┘
+      ┌────────────────────────────────────────────────────────────────┐
+      │  2. FEATURES  70+ signals per candidate                        │
+      │      title · YoE · AI-skill depth                              │
+      │      product-company exp · education · location                │
+      │                                                                │
+      └────────────────────────────────────────────────────────────────┘
+      ┌────────────────────────────────────────────────────────────────┐
+      │  3. MUST-HAVES  evidence-based detector                        │
+      │      4 must-haves (career_history sentences)                   │
+      │      5 nice-to-haves (FAISS, PyTorch, …)                       │
+      │      + hard disqualifiers (research/consulting/LangChain)      │
+      │                                                                │
+      └────────────────────────────────────────────────────────────────┘
+      ┌────────────────────────────────────────────────────────────────┐
+      │  4. FIT-SCORE  0–100, gated on must-haves met (0–4)            │
+      │      4/4 → [80,100]   3/4 → [55,75]                            │
+      │      2/4 → [30, 50]   1/4 → [10,25]   0/4 → [0,10]             │
+      │                                                                │
+      └────────────────────────────────────────────────────────────────┘
+      ┌────────────────────────────────────────────────────────────────┐
+      │  5. TRAPS  4 multiplicative + 12 honeypot flags                │
+      │      stuffer ×0.40  │  template ×0.70                          │
+      │      consulting ×0.75  │  chaser ×0.85                         │
+      │      → honeypots excluded from top-K (architectural)           │
+      │                                                                │
+      └────────────────────────────────────────────────────────────────┘
+      ┌────────────────────────────────────────────────────────────────┐
+      │  6. AVAILABILITY  additive, clipped to [0.1, 1.0]              │
+      │      open_to_work 40%  │  notice_period 25%                    │
+      │      response_rate 20%  │  recency 15%                         │
+      └────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+    final_score = (fit_score / 100) × availability_multiplier
+                              │
+                              ▼
+      sort desc by (score, candidate_id) → top-100
+                              │
+                              ▼
+      8 reasoning templates × 4 rank tiers  (≤300 chars)
+                              │
+                              ▼
+      output/submission.csv      output/submission.honeypots.csv
 ```
 
 **Honeypots never reach the top-K.** `rank.py` and `app.py` both call
@@ -149,41 +144,41 @@ multiplier — they are pulled out before ranking.
 
 ```
 redrob/
-├── rank.py                    # Main entry point — `python rank.py --candidates ...`
-├── app.py                     # Streamlit sandbox — 6 tabs, weight tuning, scoring breakdown
-├── requirements.txt           # streamlit, pandas, plotly (sandbox only)
-├── sample_candidates.jsonl    # 50-candidate sample bundled for the sandbox
-├── submission_metadata.yaml   # Stage-3 portal metadata
-├── Dockerfile                 # Multi-mode container (CLI + sandbox)
-├── docker-entrypoint.sh       # Defaults to streamlit on :8501; passthrough otherwise
-├── .streamlit/config.toml     # maxUploadSize=500, headless, no telemetry
+├── rank.py                       # Main entry — `python rank.py --candidates ...`
+├── app.py                        # Streamlit sandbox — 6 tabs, weight tuning, score breakdown
+├── requirements.txt              # streamlit, pandas, plotly (sandbox only)
+├── sample_candidates.jsonl       # 50-candidate sample bundled for the sandbox
+├── submission_metadata.yaml      # Stage-3 portal metadata
+├── Dockerfile                    # Multi-mode container (CLI + sandbox)
+├── docker-entrypoint.sh          # Defaults to streamlit on :8501; passthrough otherwise
+├── .streamlit/config.toml        # maxUploadSize=500, headless, no telemetry
 ├── src/
 │   ├── __init__.py
-│   ├── config.py              # All weights, MUST_HAVE_PATTERNS, NLP_KEYWORDS,
-│   │                          # AVAILABILITY_WEIGHTS, FIT_TIER_BASELINES,
-│   │                          # HONEYPOT_YOE_BUFFER_YEARS=8, etc.
-│   ├── parser.py              # JSONL streaming reader
-│   ├── features.py            # 70+ signals per candidate (76 fields)
-│   ├── must_haves.py          # 4 must-haves + 5 nice-to-haves + hard disqualifiers
-│   ├── trap_detector.py       # 4 trap types + honeypot composite (12 flags)
-│   ├── scoring.py             # compute_final_score(cand) → fit, availability, final
-│   ├── reasoning.py           # 8 templates × 4 rank tiers, ≤300 chars, no hallucination
-│   ├── output.py              # CSV writer + format validator
-│   ├── ranking_pipeline.py    # Reusable pipeline used by app.py
-│   └── utils.py               # Shared helpers (log normalization, etc.)
-├── tests/                     # 40/40 passing
-│   ├── test_traps.py              (9)
-│   ├── test_output.py             (6)
-│   ├── test_honeypots.py          (3)
-│   ├── test_honeypots_extended.py (13)
-│   ├── test_honeypots_excluded.py (2 — regression: honeypots never in top-K)
-│   ├── test_must_haves.py         (10)
+│   ├── config.py                     # weights, MUST_HAVE_PATTERNS, NLP_KEYWORDS,
+│   ├──                               # AVAILABILITY_WEIGHTS, FIT_TIER_BASELINES,
+│   ├──                               # HONEYPOT_YOE_BUFFER_YEARS, etc.
+│   ├── parser.py                     # JSONL streaming reader
+│   ├── features.py                   # 70+ signals per candidate (76 fields)
+│   ├── must_haves.py                 # 4 must-haves + 5 nice-to-haves + hard disqualifiers
+│   ├── trap_detector.py              # 4 trap types + honeypot composite (12 flags)
+│   ├── scoring.py                    # compute_final_score() → fit, availability, final
+│   ├── reasoning.py                  # 8 templates × 4 rank tiers, ≤300 chars
+│   ├── output.py                     # CSV writer + format validator
+│   ├── ranking_pipeline.py           # Reusable pipeline used by app.py
+│   └── utils.py                      # Shared helpers (log normalization, etc.)
+├── tests/                        # 40/40 passing
+│   ├── test_traps.py                 # 9
+│   ├── test_output.py                # 6
+│   ├── test_honeypots.py             # 3
+│   ├── test_honeypots_extended.py    # 13
+│   ├── test_honeypots_excluded.py    # 2 — regression: honeypots never in top-K
+│   ├── test_must_haves.py            # 10
 │   └── test_sample.py
 ├── docs/
-│   ├── ARCHITECTURE.md        # Full design doc (weights, data flow, compute budget)
-│   ├── METHODOLOGY.md         # How to defend the design at Stage 5
-│   └── EVALUATION.md          # Local evaluation strategy
-└── output/                    # submission.csv + submission.honeypots.csv (gitignored)
+│   ├── ARCHITECTURE.md               # Full design doc (weights, data flow, compute budget)
+│   ├── METHODOLOGY.md                # How to defend the design at Stage 5
+│   └── EVALUATION.md                 # Local evaluation strategy
+└── output/                       # submission.csv + submission.honeypots.csv (gitignored)
 ```
 
 ## Performance
