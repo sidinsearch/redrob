@@ -65,7 +65,7 @@ ai_tools_used:
   # Other options: "ChatGPT", "Cursor", "Gemini", "Codeium", "GitHub Copilot", "Other", "None"
 
 ai_usage_summary: |
-  AI tools (Claude, OpenCode) used for:
+  AI tools (Claude Code) used for:
   - Architecture discussion and review
   - Code structure planning and refactoring
   - Documentation drafting (README, METHODOLOGY, EVALUATION)
