@@ -152,6 +152,7 @@ redrob/
 ├── Dockerfile                    # Multi-mode container (CLI + sandbox)
 ├── docker-entrypoint.sh          # Defaults to streamlit on :8501; passthrough otherwise
 ├── .streamlit/config.toml        # maxUploadSize=500, headless, no telemetry
+├── LICENSE.md                    # MIT license
 ├── src/
 │   ├── __init__.py
 │   ├── config.py                     # weights, MUST_HAVE_PATTERNS, NLP_KEYWORDS,
@@ -288,4 +289,6 @@ Coverage:
 
 ## License
 
-MIT.
+[MIT](LICENSE.md) — see [`LICENSE.md`](LICENSE.md) for full text.
+
+Team **byte bots** (Siddharth Shinde, Jaid Tamboli, Prathamesh Mane), 2026.
