@@ -61,7 +61,9 @@ compute:
 # may verify these declarations against your code; declarations that contradict
 # your code or your interview are flagged.
 ai_tools_used:
-  - "Claude"        # e.g. for architecture discussion, code review
+  - "Claude Code"
+  - "GitHub Copilot" 
+  # e.g. for architecture discussion, code review
   # Other options: "ChatGPT", "Cursor", "Gemini", "Codeium", "GitHub Copilot", "Other", "None"
 
 ai_usage_summary: |
